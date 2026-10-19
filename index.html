@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en" style="background-color: #000000; color: #ffffff;">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Aragon - Paid - LMS-Guruji</title>
+  <meta name="description" content="A premium learning application using the Clean Depth design system." />
+  <meta property="og:title" content="Aragon - Paid - LMS-Guruji" />
+  <meta property="og:description" content="A premium learning application using the Clean Depth design system." />
+  <link rel="preload" as="image" href="/Monochrome Guruji App Showcase.png" type="image/png" fetchpriority="high" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&family=Plus+Jakarta+Sans:wght@500;700;800&display=swap" media="print" onload="this.media='all'" />
+</head>
+<body style="background-color: #000000; margin: 0; color: #ffffff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+  <div id="root">
+    <!-- Instant Interactive First-Paint Shell -->
+    <div
+      onclick="window.__gurujiExploreClicked = true; var btn = document.getElementById('instant-cta-btn'); if (btn) { btn.style.transform = 'scale(0.98)'; btn.style.background = 'rgba(255,255,255,0.22)'; } var lbl = document.getElementById('instant-cta-label'); if (lbl) { lbl.textContent = 'Opening...'; }"
+      style="min-height: 100dvh; max-width: 32rem; margin: 0 auto; background-color: #000000; color: #ffffff; display: flex; flex-direction: column; justify-content: space-between; padding: 1.5rem; box-sizing: border-box; text-align: center; user-select: none; cursor: pointer;"
+    >
+      <div style="margin: auto 0; display: flex; align-items: center; justify-content: center; padding: 1rem 0;">
+        <img
+          src="/Monochrome Guruji App Showcase.png"
+          alt="Coach Guruji Presentation"
+          fetchpriority="high"
+          decoding="sync"
+          style="width: 320px; height: 320px; object-fit: contain;"
+        />
+      </div>
+      <div style="width: 100%; max-width: 24rem; margin: 0 auto; padding-bottom: 1rem;">
+        <h1 style="font-size: 2.5rem; font-weight: 900; margin: 0; letter-spacing: -0.025em; line-height: 1;">Guruji</h1>
+        <p style="font-size: 13px; color: #94a3b8; margin: 0.35rem 0 1rem 0;">Frontline Coach</p>
+        <div
+          id="instant-cta-btn"
+          style="width: 100%; height: 3rem; border-radius: 9999px; background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.25); display: flex; align-items: center; justify-content: center; gap: 0.5rem; font-weight: 600; font-size: 0.95rem; transition: all 0.15s ease;"
+        >
+          <span id="instant-cta-label">Tap to explore</span>
+          <span>→</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+</html>
