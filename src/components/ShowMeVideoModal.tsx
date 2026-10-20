@@ -85,7 +85,7 @@ function getScenesForLesson(lesson?: Lesson): OperationalScene[] {
   const description = lesson.description || '';
   const fullContext = `${lessonTitle} ${lesson.category || ''} ${description}`;
 
-  const getFallbackImageForScene = (idx: number, text: string) => {
+  const getFallbackImageForScene = (idx: number, text: string): string => {
     const combined = `${fullContext} ${text}`.toLowerCase();
     if (combined.includes('boarding') || combined.includes('aviation') || combined.includes('flight') || combined.includes('passenger')) {
       const images = [
@@ -96,7 +96,7 @@ function getScenesForLesson(lesson?: Lesson): OperationalScene[] {
       ];
       return images[idx % images.length];
     }
-    return findBestVisualMatch(text, fullContext).url;
+    return findBestVisualMatch(text, fullContext).url || '/demonstration_scenes/scene_1.png';
   };
 
   // 1. Check videoPlan.clips

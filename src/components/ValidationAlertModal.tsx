@@ -2,7 +2,7 @@ import React from 'react';
 import { AlertTriangle, X, RefreshCw, FileText } from 'lucide-react';
 import { sounds } from '../utils/audio';
 
-interface ValidationErrorModalProps {
+interface ValidationAlertModalProps {
   isOpen: boolean;
   filename: string;
   errorReason: string;
@@ -10,13 +10,13 @@ interface ValidationErrorModalProps {
   onTryAnother: () => void;
 }
 
-export default function ValidationErrorModal({
+export default function ValidationAlertModal({
   isOpen,
   filename,
   errorReason,
   onClose,
   onTryAnother,
-}: ValidationErrorModalProps) {
+}: ValidationAlertModalProps) {
   if (!isOpen) return null;
 
   return (

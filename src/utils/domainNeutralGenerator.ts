@@ -24,6 +24,7 @@ import {
 import { buildVeoPrompt } from './veoPromptBuilder';
 import { planVideoDemonstration } from './videoPlanEngine';
 import { deriveSemanticConceptLabel } from './learnerCopySanitizer';
+import { stitchWrappedLines } from './documentExtractor';
 
 const METADATA_PATTERNS = [
   /^standard operating procedure/i,
@@ -60,9 +61,25 @@ const METADATA_PATTERNS = [
   /^role\s*:/i,
   /^position\s*:/i,
   /^purpose\s*:/i,
+  /^purpose\b/i,
   /^scope\s*:/i,
   /^objective\s*:/i,
   /^prerequisite[s]?\s*:/i,
+  /^document note/i,
+  /^document notes/i,
+  /^note\s*[\:\—\-]/i,
+  /^disclaimer\s*[\:\—\-]/i,
+  /fictional sop/i,
+  /created for testing/i,
+  /not an approved procedure/i,
+  /where this sop refers/i,
+  /training system must not/i,
+  /common situations for practice/i,
+  /situations for practice/i,
+  /critical controls/i,
+  /^all rights reserved/i,
+  /^copyright/i,
+  /^exceptions and escalation/i,
 ];
 
 function isOperationalContent(line: string, filename?: string): boolean {
@@ -87,27 +104,71 @@ function isOperationalContent(line: string, filename?: string): boolean {
  * Builds the SopKnowledgeModel from extracted document text
  */
 export function buildSopKnowledgeModel(extracted: ExtractedDocument): SopKnowledgeModel {
-  const rawText = extracted.rawText;
+  const rawText = stitchWrappedLines(extracted.rawText);
   const lowerText = rawText.toLowerCase();
 
   let role = 'Workplace Operator';
-  let process = extracted.filename.replace(/\.(txt|pdf|docx)$/i, '');
+  let process = extracted.filename
+    .replace(/\.(txt|pdf|docx)$/i, '')
+    .replace(/_sop_test$/i, '')
+    .replace(/_test$/i, '')
+    .replace(/[_-]+/g, ' ')
+    .trim();
   let department = '';
-
-  const roleMatch = rawText.match(/\b(?:role|position|title|for):\s*([^\n\r.]+)/i);
-  if (roleMatch && roleMatch[1].trim().length > 2) {
-    role = roleMatch[1].trim();
-  }
-
-  const deptMatch = rawText.match(/\b(?:department|dept|unit):\s*([^\n\r.]+)/i);
-  if (deptMatch && deptMatch[1].trim().length > 2) {
-    department = deptMatch[1].trim();
-  }
+  let docPurpose = '';
 
   const rawLines = rawText
     .split('\n')
     .map((l) => l.trim())
     .filter((l) => l.length > 0);
+
+  // Extract clean process title from document header lines if available
+  for (let i = 0; i < Math.min(5, rawLines.length); i++) {
+    const line = rawLines[i].trim();
+    if (/^standard operating procedure[:\s\-]*(.+)$/i.test(line)) {
+      let candidate = line.replace(/^standard operating procedure[:\s\-]*/i, '').trim();
+      candidate = candidate.split(/\s+(?:document ref|doc ref|version|department|role|purpose|scope)\b/i)[0].trim();
+      if (candidate.length > 4) {
+        process = candidate;
+        break;
+      }
+    } else if (/^standard operating procedure$/i.test(line)) {
+      let next = rawLines[i + 1]?.trim() || '';
+      if (next && !METADATA_PATTERNS.some((p) => p.test(next))) {
+        next = next.split(/\s+(?:document ref|doc ref|version|department|role|purpose|scope)\b/i)[0].trim();
+        process = next.replace(/^[\s\-–—]+/, '').trim();
+        break;
+      }
+    }
+  }
+
+  // Tightly bounded role match (1-5 words, max 40 chars, stopped before other fields)
+  const roleMatch = rawText.match(/\b(?:role|position|for):\s*([^\n\r,;•|]+?)(?=\s+(?:department|purpose|scope|version|ref|standard)|\s*$)/i);
+  if (roleMatch && roleMatch[1].trim().length > 2 && roleMatch[1].trim().length <= 40) {
+    const candidateRole = roleMatch[1].trim();
+    if (!/^(?:purpose|department|standard|procedure|section|step)/i.test(candidateRole)) {
+      role = candidateRole;
+    }
+  }
+
+  const deptMatch = rawText.match(/\b(?:department|dept|unit):\s*([^\n\r,;•|]+?)(?=\s+(?:role|position|purpose|version|ref)|\s*$)/i);
+  if (deptMatch && deptMatch[1].trim().length > 2 && deptMatch[1].trim().length <= 40) {
+    department = deptMatch[1].trim();
+  }
+
+  // Extract document purpose from purpose header line or section
+  const purposeIdx = rawLines.findIndex((l) => /^purpose\b/i.test(l.trim()));
+  if (purposeIdx !== -1 && rawLines[purposeIdx + 1]) {
+    const nextLine = rawLines[purposeIdx + 1].trim();
+    if (nextLine && !METADATA_PATTERNS.some((p) => p.test(nextLine))) {
+      docPurpose = nextLine;
+    }
+  } else {
+    const purposeMatch = rawText.match(/\b(?:purpose|objective):\s*([^\n\r]+)/i);
+    if (purposeMatch && purposeMatch[1].trim().length > 5) {
+      docPurpose = purposeMatch[1].trim();
+    }
+  }
 
   const stepsList: SopKnowledgeModel['steps'] = [];
   const decisionPoints: SopKnowledgeModel['decisionPoints'] = [];
@@ -122,6 +183,13 @@ export function buildSopKnowledgeModel(extracted: ExtractedDocument): SopKnowled
   // Check if document has explicit operational lifecycle sections (e.g. ORIENT — and PERFORM —)
   const hasStructuredSections = rawLines.some((l) => /^(?:\d+[\.\)]\s+)?ORIENT\s*[\—\-]/i.test(l.trim())) &&
     rawLines.some((l) => /^(?:\d+[\.\)]\s+)?PERFORM\s*[\—\-]/i.test(l.trim()));
+
+  const hasNumberedSectionsWithBullets = rawLines.some((l, idx) => {
+    const isNum = /^\d+[\.\)]\s+[A-Za-z]/.test(l.trim()) && !l.trim().endsWith('.');
+    const nextLine = rawLines[idx + 1]?.trim() || '';
+    return isNum && /^[•\-\*]/.test(nextLine);
+  });
+  const hasNumberedSections = !hasStructuredSections && hasNumberedSectionsWithBullets;
 
   if (hasStructuredSections) {
     let currentCategory:
@@ -257,6 +325,111 @@ export function buildSopKnowledgeModel(extracted: ExtractedDocument): SopKnowled
         });
       }
     }
+  } else if (hasNumberedSections) {
+    let currentSectionNum = 0;
+    let currentSectionTitle = 'Main Execution';
+    let inSpecialSection: 'NONE' | 'CONTROLS' | 'PRACTICE' | 'EXCEPTIONS' | 'PURPOSE' = 'NONE';
+
+    for (const line of rawLines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      const isSpecial = trimmed.match(/^(?:critical controls|common situations for practice|situations for practice|exceptions and escalation|exceptions|escalations|purpose)\b/i);
+      if (isSpecial) {
+        const text = isSpecial[0].toLowerCase();
+        if (text.includes('critical control')) inSpecialSection = 'CONTROLS';
+        else if (text.includes('situation')) inSpecialSection = 'PRACTICE';
+        else if (text.includes('exception')) inSpecialSection = 'EXCEPTIONS';
+        else if (text.includes('purpose')) inSpecialSection = 'PURPOSE';
+        continue;
+      }
+
+      const numMatch = trimmed.match(/^(?:(?:section|step|phase)\s+(\d+)[:\.]?|(\d+)[\.\)])\s+(.*)$/i);
+      if (numMatch) {
+        inSpecialSection = 'NONE';
+        currentSectionNum = parseInt(numMatch[1] || numMatch[2], 10);
+        currentSectionTitle = (numMatch[3] || '').trim();
+        if (/exceptions|escalation/i.test(currentSectionTitle)) {
+          inSpecialSection = 'EXCEPTIONS';
+        }
+        continue;
+      }
+
+      if (currentSectionNum === 0 || inSpecialSection === 'PURPOSE') {
+        continue;
+      }
+
+      const cleanItem = trimmed.replace(/^[\d\.\-\*\•\:)\s]+/, '').trim();
+      if (cleanItem.length < 10) continue;
+
+      if (inSpecialSection === 'CONTROLS') {
+        criticalControls.push(cleanItem);
+        if (/^(?:never|do not)\b/i.test(cleanItem)) mistakesFound.push(cleanItem);
+        continue;
+      }
+      if (inSpecialSection === 'PRACTICE') {
+        decisionPoints.push({
+          id: decisionPoints.length + 1,
+          situation: cleanItem,
+          options: [cleanItem, `Proceed without completing standard verification check`],
+          correctDecision: cleanItem,
+          rationale: `SOP Standard: "${cleanItem}"`,
+          sourceEvidence: cleanItem,
+        });
+        continue;
+      }
+      if (inSpecialSection === 'EXCEPTIONS') {
+        const parts = cleanItem.split(/:\s*/);
+        const sit = parts[0]?.trim() || cleanItem;
+        const act = parts.slice(1).join(': ').trim() || cleanItem;
+        exceptions.push({ situation: sit, response: act, sourceEvidence: cleanItem });
+        if (/report|supervisor|escalat|manager|coordinator/i.test(act)) {
+          escalations.push({
+            trigger: sit,
+            action: act,
+            escalationTarget: act.match(/(?:notify|contact|escalate to|report to|with the)\s+([A-Za-z0-9\s\-_]+)/i)?.[1]?.trim() || 'Housekeeping Supervisor',
+            sourceEvidence: cleanItem,
+          });
+        }
+        continue;
+      }
+
+      // Inside Operational Section:
+      if (/^(?:never|do not)\b/i.test(cleanItem)) {
+        mistakesFound.push(cleanItem);
+        criticalControls.push(cleanItem);
+      } else if (/^if\b/i.test(cleanItem)) {
+        const parts = cleanItem.split(/,\s*/);
+        const sit = parts[0]?.trim() || cleanItem;
+        const act = parts.slice(1).join(', ').trim() || cleanItem;
+        decisionPoints.push({
+          id: decisionPoints.length + 1,
+          situation: sit,
+          options: [act, `Proceed without completing verification check`],
+          correctDecision: act,
+          rationale: cleanItem,
+          sourceEvidence: cleanItem,
+        });
+        exceptions.push({ situation: sit, response: act, sourceEvidence: cleanItem });
+        if (/report|supervisor|escalat|manager/i.test(act)) {
+          escalations.push({
+            trigger: sit,
+            action: act,
+            escalationTarget: 'Housekeeping Supervisor',
+            sourceEvidence: cleanItem,
+          });
+        }
+      } else {
+        stepsList.push({
+          id: stepsList.length + 1,
+          action: cleanItem,
+          expectedOutcome: cleanItem,
+          sourceEvidence: cleanItem,
+          pageOrSection: `Section ${currentSectionNum}: ${currentSectionTitle}`,
+          sourceRef: `S1.sec${stepsList.length + 1}`,
+        });
+      }
+    }
   } else {
     // Fallback for unstructured SOPs (preserves existing behavior with safety filters)
     let currentSection = 'Main Execution';
@@ -294,7 +467,10 @@ export function buildSopKnowledgeModel(extracted: ExtractedDocument): SopKnowled
         const parts = line.split(/(?<=[.!?])\s+/);
         parts.forEach((p) => {
           const clean = p.replace(/^[\d\.\-\*\•\:)\s]+/, '').trim();
-          if (clean.length > 12 && isOperationalContent(clean, extracted.filename)) {
+          if (clean.length < 15 || /^[a-z]/.test(clean) || /^(?:for the|and\s+|or\s+|not invent|appropriate and|the approved)\b/i.test(clean)) {
+            return;
+          }
+          if (isOperationalContent(clean, extracted.filename)) {
             const pageNum = Math.min(extracted.pageCount, Math.ceil((stepsList.length + 1) / 2));
             stepsList.push({
               id: stepsList.length + 1,
@@ -400,14 +576,14 @@ export function buildSopKnowledgeModel(extracted: ExtractedDocument): SopKnowled
       role,
       process,
     },
-    purpose: stepsList[0]?.action ? `Execute ${process} accurately and verify every operational control gate.` : `Standard procedure for ${role}.`,
+    purpose: docPurpose || (stepsList[0]?.action ? `Execute ${process} accurately and verify every operational control gate.` : `Standard procedure for ${role}.`),
     scope: department ? `${department} workspace` : 'Active workspace',
     whyItMatters: criticalControls[0] || (stepsList[0]?.action ? stepsList[0].action : 'Maintains operational compliance.'),
     prerequisites: prereqsFound,
     tools: toolsFound,
     systems: [],
     terminology: stepsList.slice(0, 6).map((s, idx) => ({
-      term: deriveSemanticConceptLabel(s.action, idx),
+      term: deriveSemanticConceptLabel(s.action, `Standard 0${idx + 1}`),
       meaning: s.action,
       sourceEvidence: s.sourceEvidence,
     })),

@@ -160,7 +160,7 @@ const GammaEditorialSlideCard: React.FC<{
           }));
 
     return rawItems.map((item, idx) => {
-      const pair = synthesizeEditorialMicroCopy(item.title, item.body, idx);
+      const pair = synthesizeEditorialMicroCopy(item.title, item.body, undefined, `Checkpoint 0${idx + 1}`);
       return {
         ...item,
         badge: item.badge || String(idx + 1).padStart(2, '0'),
@@ -226,7 +226,7 @@ const GammaEditorialSlideCard: React.FC<{
         ? slide.cards.map((c, idx) => {
             const rawHeading =
               c.label && !/^(Avoid This|Do This|Standard|Step \d+)$/i.test(c.label) ? c.label : '';
-            const pair = synthesizeEditorialMicroCopy(rawHeading, c.subtext || c.consequence || c.value, idx);
+            const pair = synthesizeEditorialMicroCopy(rawHeading, c.subtext || c.consequence || c.value, undefined, `Rule 0${idx + 1}`);
             return {
               badge: String(idx + 1).padStart(2, '0'),
               title: pair.title,
@@ -350,7 +350,7 @@ const GammaEditorialSlideCard: React.FC<{
 
     const columns = isProcessSpine
       ? slide.cards.map((c, idx) => {
-          const pair = synthesizeEditorialMicroCopy(c.label, c.subtext || c.value, idx);
+          const pair = synthesizeEditorialMicroCopy(c.label, c.subtext || c.value, undefined, `Stage 0${idx + 1}`);
           return {
             badge: String(idx + 1).padStart(2, '0'),
             title: pair.title,
@@ -525,7 +525,8 @@ const GammaEditorialSlideCard: React.FC<{
               const pair = synthesizeEditorialMicroCopy(
                 card.label && !/^If \/ When$/i.test(card.label) ? card.label : '',
                 card.value,
-                idx
+                undefined,
+                `Exception 0${idx + 1}`
               );
               const conditionTitle = sanitizeLearnerText(card.value) || pair.title;
               const actionBody = sanitizeLearnerText(
@@ -748,8 +749,22 @@ export const ExperiencePlayer: React.FC<{
     };
   }, [adaptiveSlides, blueprint.sopTitle, blueprint.role]);
 
-  const cleanSopTitle = useMemo(() => sanitizeLearnerText(blueprint.sopTitle), [blueprint.sopTitle]);
-  const cleanRole = useMemo(() => sanitizeLearnerText(blueprint.role), [blueprint.role]);
+  const cleanSopTitle = useMemo(() => {
+    let title = sanitizeLearnerText(blueprint.sopTitle);
+    title = title.replace(/\.(txt|pdf|docx)$/i, '').replace(/_sop_test$/i, '').replace(/_test$/i, '').replace(/_+/g, ' ').replace(/\s*[-–—]\s*/g, ' — ').replace(/\s{2,}/g, ' ').trim();
+    return title;
+  }, [blueprint.sopTitle]);
+
+  const cleanRole = useMemo(() => {
+    let r = sanitizeLearnerText(blueprint.role);
+    // Bounded role guard: if role exceeds 35 chars or contains leaked purpose keywords, extract just the role title
+    if (r.length > 35 || /\b(?:purpose|prepare|execute|standard|cleaning|turnover|process|department)\b/i.test(r)) {
+      r = r.split(/[•\n\r|;]|(?:\s+(?:purpose|prepare|execute|by|standard|process|department)\b)/i)[0].trim();
+      if (r.length > 35) r = r.slice(0, 35).trim();
+    }
+    return r || 'Frontline Specialist';
+  }, [blueprint.role]);
+
   const cleanPurpose = useMemo(() => {
     let p = sanitizeLearnerText(blueprint.purpose);
     // Strip leading title repeat inside purpose paragraph if present
@@ -757,7 +772,7 @@ export const ExperiencePlayer: React.FC<{
       p = p.slice(cleanSopTitle.length).replace(/^[\s.:–—-]+/, '').trim();
     }
     if (!p || isDuplicateLearnerCopy(cleanSopTitle, p)) {
-      return `Execute ${cleanSopTitle.toLowerCase()} with clear verification gates, accurate sequence, and immediate escalation when an exception occurs.`;
+      return `Execute ${cleanSopTitle} with clear verification gates, accurate sequence, and immediate escalation when an exception occurs.`;
     }
     return p;
   }, [blueprint.purpose, cleanSopTitle]);

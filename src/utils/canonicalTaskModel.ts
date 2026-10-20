@@ -42,7 +42,7 @@ export interface CanonicalStep {
   whyItMatters?: string;
   criticalControl?: boolean;
   scenarioQuestion?: string;
-  choices?: { id: string; title: string; subtitle: string; isCorrect: boolean }[];
+  choices?: { id: string; title: string; subtitle?: string; isCorrect: boolean }[];
   coachTip?: string;
   hint?: string;
   provenance: ProvenanceCategory;

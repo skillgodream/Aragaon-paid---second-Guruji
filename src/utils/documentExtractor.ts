@@ -45,6 +45,51 @@ export function computeDeterministicHash(str: string): string {
 }
 
 /**
+ * Stitches hard-wrapped lines from PDF/OCR layout into coherent sentences and paragraphs.
+ * Handles trailing hyphens (e.g. "turn-" + "over" -> "turnover") and avoids splitting
+ * sentences when lines wrap without sentence-terminal punctuation.
+ */
+function isHeaderOrMetadataLine(str: string): boolean {
+  const s = str.trim();
+  if (!s) return false;
+  if (/^(?:standard operating procedure|sop\b|document ref|version|department|role|position|purpose|scope|objective|prerequisite)/i.test(s)) return true;
+  if (/^(?:(?:section|part|phase)\s+\d+|\d+[\.\)]\s+[A-Za-z][^\.\!\?]*$)/i.test(s)) return true;
+  if (/^(?:critical controls|common situations for practice|exceptions and escalation|disclaimer|document note)/i.test(s)) return true;
+  return false;
+}
+
+export function stitchWrappedLines(text: string): string {
+  if (!text || text.indexOf('\n') === -1) return text;
+
+  const lines = text.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
+  const result: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (result.length === 0) {
+      result.push(line);
+      continue;
+    }
+
+    const prev = result[result.length - 1];
+    const prevEndsPunct = /[.:!?]$/.test(prev);
+    const startsLower = /^[a-z]/.test(line);
+    const isNewItem = /^(?:\d+[\.\)]\s+|•|\-|\*|>)/.test(line) || isHeaderOrMetadataLine(line);
+    const prevIsHeader = isHeaderOrMetadataLine(prev);
+
+    // Also handle trailing hyphenation, e.g. "turn-" + "over" -> "turnover"
+    if (prev.endsWith('-') && startsLower) {
+      result[result.length - 1] = prev.slice(0, -1) + line;
+    } else if (!prevIsHeader && !isNewItem && (startsLower || !prevEndsPunct)) {
+      result[result.length - 1] = prev + ' ' + line;
+    } else {
+      result.push(line);
+    }
+  }
+  return result.join('\n');
+}
+
+/**
  * Normalizes text to Unicode NFC and strips ONLY non-printable control characters.
  * Preserves all valid Unicode scripts (Latin, Devanagari, Cyrillic, CJK),
  * curly quotes (“ ” ‘ ’), dashes (– —), bullets (•), accents (é ñ ü), and symbols.
@@ -68,6 +113,9 @@ export function normalizeUnicodeText(input: string): { normalizedText: string; d
 
   // Normalize excessive horizontal whitespace (preserve paragraph newlines)
   text = text.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+
+  // 3. Reconstruct flowing sentences across PDF line-breaks
+  text = stitchWrappedLines(text);
 
   const words = text.split(/\s+/).filter((w) => w.length > 0);
   const wordCount = words.length;

@@ -65,7 +65,29 @@ export async function extractSlidesFromPdf(
         }
         if (currentLine.trim()) pageLines.push(currentLine.trim());
 
-        const pageText = pageLines.join('\n');
+        // Stitch wrapped lines belonging to the same bullet or paragraph
+        const stitchedLines: string[] = [];
+        for (const pline of pageLines) {
+          const trimmed = pline.trim();
+          if (!trimmed) continue;
+          if (stitchedLines.length === 0) {
+            stitchedLines.push(trimmed);
+            continue;
+          }
+          const prev = stitchedLines[stitchedLines.length - 1];
+          const isNewItem = /^(?:\d+[\.\)]\s+|•|\-|\*|[A-Z\s]{4,}:?)/.test(trimmed);
+          const prevEndsPunct = /[.:!?]$/.test(prev);
+          const startsLower = /^[a-z]/.test(trimmed);
+          if (prev.endsWith('-') && startsLower) {
+            stitchedLines[stitchedLines.length - 1] = prev.slice(0, -1) + trimmed;
+          } else if (startsLower || (!prevEndsPunct && !isNewItem)) {
+            stitchedLines[stitchedLines.length - 1] = prev + ' ' + trimmed;
+          } else {
+            stitchedLines.push(trimmed);
+          }
+        }
+
+        const pageText = stitchedLines.join('\n');
         if (pageText.trim()) {
           fullText += `${pageText}\n\n`;
         }
@@ -88,8 +110,8 @@ export async function extractSlidesFromPdf(
           console.warn(`[PDF Service] Canvas render failed for page ${i}:`, renderErr);
         }
 
-        const title = pageLines[0] || `Slide ${i}`;
-        const bullets = pageLines.slice(1).filter((l) => l.trim().length > 0);
+        const title = stitchedLines[0] || `Slide ${i}`;
+        const bullets = stitchedLines.slice(1).filter((l) => l.trim().length > 0);
 
         slides.push({
           slideNumber: i,

@@ -14,7 +14,7 @@ import RoleNavigationModal, { UserRole } from './components/RoleNavigationModal'
 // Code-split heavy modals, navigation & secondary views so initial bundle loads in <200ms
 const BottomNav = React.lazy(() => import('./components/BottomNav'));
 const GyanChatModal = React.lazy(() => import('./components/GyanChatModal'));
-const ValidationErrorModal = React.lazy(() => import('./components/ValidationErrorModal'));
+const ValidationAlertModal = React.lazy(() => import('./components/ValidationAlertModal'));
 const HomeScreen = React.lazy(() =>
   import('./screens/HomeScreen').then((m) => ({ default: m.HomeScreen }))
 );
@@ -320,6 +320,7 @@ export default function App() {
 
       // 3. GENERATE OPERATIONAL BLUEPRINT VIA SERVER LLM OR LOCAL BRAIN
       let opBlueprint;
+      let shouldUseLocal = false;
       try {
         const bpController = new AbortController();
         const bpTimeout = setTimeout(() => bpController.abort(), 60000);
@@ -345,6 +346,9 @@ export default function App() {
             opBlueprint = data.blueprint;
           } else {
             console.warn('[SOP Pipeline] Server LLM returned:', data.error || data.reason || data.message);
+            if (data.useLocalGenerator) {
+              shouldUseLocal = true;
+            }
           }
         } else {
           console.warn('[SOP Pipeline] Server returned HTTP', res.status, res.statusText);
@@ -353,8 +357,8 @@ export default function App() {
         console.warn('[SOP Pipeline] Server LLM blueprint error or timeout:', err?.message || err);
       }
 
-      // Secondary Fallback via /api/coach
-      if (!opBlueprint) {
+      // Secondary Fallback via /api/coach (only if local generator was not explicitly requested)
+      if (!opBlueprint && !shouldUseLocal) {
         try {
           console.log('[SOP Pipeline] Trying secondary endpoint /api/coach for blueprint generation...');
           const coachController = new AbortController();
@@ -1123,9 +1127,9 @@ export default function App() {
           </div>
         )}
 
-        {/* SOURCE FIDELITY VALIDATION ERROR MODAL */}
+        {/* SOURCE FIDELITY VALIDATION ALERT MODAL */}
         {validationError !== null && (
-          <ValidationErrorModal
+          <ValidationAlertModal
             isOpen={validationError !== null}
             filename={validationError?.filename || 'Document'}
             errorReason={validationError?.reason || 'Content cannot be used.'}

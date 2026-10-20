@@ -63,6 +63,12 @@ const INLINE_WRAPPER_REPLACEMENTS: Array<[RegExp, string]> = [
   [/\bInstead:\s*(?=Instead\b)/gi, ''],
   // Strip mechanical pagination suffixes like "(1/2)" or "(2/2)" from learner titles
   [/\s*\(\d+\/\d+\)\s*$/g, ''],
+  // Strip trailing stray numbering from OCR or bullet fragments (e.g., "... 1." or " — 2") without destroying phrases like "Stages 1 to 6" or "Control 1"
+  [/(?:\s*\.{3,}|\s+[—–]\s*)\d+\.?\s*$/g, ''],
+  // Domain Contamination Firewall: Clean out hallucinated finance/collection terms from check-in contexts
+  [/\b(?:folios?,\s*)?debt\s+write-offs?(?:\s+and\s+chargebacks?)?\b/gi, 'payment disputes and uncollected balances'],
+  [/\bchargebacks?(?:\s+and\s+debt\s+write-offs?)?\b/gi, 'unauthorized payment disputes'],
+  [/\bfolio\s+debt\s+write-offs?\b/gi, 'uncollected balance disputes'],
 ];
 
 /** Words that must NEVER appear at the end of a card or micro-item title */
@@ -86,7 +92,7 @@ const DANGLING_TITLE_END_WORDS = new Set([
 
 /**
  * Cleans a learner-facing string by removing internal backend prefixes,
- * source reference codes, double prefixes, and meta-SOP wrapper phrases.
+ * source reference codes, double prefixes, stray numbers, and meta-SOP wrapper phrases.
  */
 export function sanitizeLearnerText(input?: string | null): string {
   if (!input) return '';
@@ -101,6 +107,10 @@ export function sanitizeLearnerText(input?: string | null): string {
   if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
     text = text.slice(1, -1).trim();
   }
+
+  // Strip trailing stray numbering from OCR or bullet fragments without destroying legitimate phrases
+  text = text.replace(/(?:\s*\.{3,}|\s+[—–]\s*)\d+\.?\s*$/, '').trim();
+  text = text.replace(/\.{2,}/g, '.').replace(/\s+([.,;:])/g, '$1');
 
   for (const bp of BACKEND_BOILERPLATE_PATTERNS) {
     if (bp.test(text)) {

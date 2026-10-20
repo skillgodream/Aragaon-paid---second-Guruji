@@ -40,7 +40,7 @@ export interface OperationalBlueprintItem {
   action_verb?: string;
   critical_control?: boolean;
   scenario_question?: string;
-  choices?: { id: string; title: string; subtitle: string; isCorrect: boolean }[];
+  choices?: { id: string; title: string; subtitle?: string; isCorrect: boolean }[];
   coach_tip?: string;
   hint?: string;
   task_title?: string;

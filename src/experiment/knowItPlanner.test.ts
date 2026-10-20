@@ -437,7 +437,7 @@ const massive104Lesson: Lesson = {
 };
 
 const plan7 = planKnowItSlides(massive104Lesson);
-assert(plan7.adaptiveSlides.length >= 20, `Massive 104-step SOP preserves all 104 steps across adaptive slides without arbitrary cap (got ${plan7.adaptiveSlides.length})`);
+assert(plan7.adaptiveSlides!.length >= 20, `Massive 104-step SOP preserves all 104 steps across adaptive slides without arbitrary cap (got ${plan7.adaptiveSlides!.length})`);
 assert(plan7.qaReport.coveredSourceSteps === 104, `All 104 steps preserved in QA report (got ${plan7.qaReport.coveredSourceSteps})`);
 
 // Ensure no slide contains the corrupted joined titles or duplicate strings
@@ -637,8 +637,8 @@ assert(
   `Housekeeping SOP preserves all 5 steps in TeachingBlueprint (got ${hkPlan.teachingBlueprint.totalSourceSteps})`
 );
 assert(
-  hkPlan.adaptiveSlides.length >= 7,
-  `Housekeeping SOP generates a complete multi-slide adaptive deck (${hkPlan.adaptiveSlides.length} slides, never 1 slide)`
+  hkPlan.adaptiveSlides!.length >= 7,
+  `Housekeeping SOP generates a complete multi-slide adaptive deck (${hkPlan.adaptiveSlides!.length} slides, never 1 slide)`
 );
 assert(
   hkPlan.qaReport.isValid === true,
@@ -657,8 +657,8 @@ assert(
   `BlueprintV1-only lesson extracts all 5 watch steps when operationalBlueprint is undefined (got ${bpOnlyPlan.teachingBlueprint.totalSourceSteps})`
 );
 assert(
-  bpOnlyPlan.adaptiveSlides.length >= 6,
-  `BlueprintV1-only lesson generates ${bpOnlyPlan.adaptiveSlides.length} adaptive slides (never collapses to 1 slide)`
+  bpOnlyPlan.adaptiveSlides!.length >= 6,
+  `BlueprintV1-only lesson generates ${bpOnlyPlan.adaptiveSlides!.length} adaptive slides (never collapses to 1 slide)`
 );
 console.log('✅ TEST 11 PASSED: Housekeeping SOP and BlueprintV1-only lessons generate complete multi-slide decks.\n');
 
@@ -680,7 +680,7 @@ const forbiddenBackendPhrases = [
   'Illustrative AI Visual (Non-Authoritative',
 ];
 
-for (const slide of [...hkPlan.adaptiveSlides, ...cryoPlan.adaptiveSlides]) {
+for (const slide of [...(hkPlan.adaptiveSlides || []), ...(cryoPlan.adaptiveSlides || [])]) {
   const visibleSlideFields = [
     slide.title,
     slide.subtitle,
@@ -688,7 +688,7 @@ for (const slide of [...hkPlan.adaptiveSlides, ...cryoPlan.adaptiveSlides]) {
     slide.layoutName,
     slide.takeawayOrQuestion,
     slide.photoProvenanceLabel,
-    ...slide.cards.flatMap((c) => [c.label, c.value, c.subtext, c.why, c.consequence, c.tag]),
+    ...slide.cards.flatMap((c: any) => [c.label, c.value, c.subtext, c.why, c.consequence, c.tag]),
   ]
     .filter(Boolean)
     .join(' ');
@@ -721,7 +721,7 @@ console.log('✅ TEST 12 PASSED: Zero backend phrases or duplicate card sentence
 // TEST 13: GAMMA 4-STAGE TRAINING STORY, SEMANTIC HEADINGS & AUTO-REPAIR
 // ============================================================================
 console.log('TEST 13: Gamma 4-Stage Training Story, Semantic Headings & Auto-Repair');
-for (const slide of [...hkPlan.adaptiveSlides, ...cryoPlan.adaptiveSlides]) {
+for (const slide of [...(hkPlan.adaptiveSlides || []), ...(cryoPlan.adaptiveSlides || [])]) {
   // 1. Zero "(1/2)" or "(2/2)" pagination tags in slide titles
   assert(
     !/\(\d+\s*\/\s*\d+\)/.test(slide.title),
@@ -750,29 +750,125 @@ for (const slide of [...hkPlan.adaptiveSlides, ...cryoPlan.adaptiveSlides]) {
 }
 
 // 3. Consecutive slides in Housekeeping deck must not share the exact same gammaArchetype
-for (let i = 1; i < hkPlan.adaptiveSlides.length; i++) {
-  const prevArch = hkPlan.adaptiveSlides[i - 1].gammaArchetype;
-  const currArch = hkPlan.adaptiveSlides[i].gammaArchetype;
+for (let i = 1; i < hkPlan.adaptiveSlides!.length; i++) {
+  const prevArch = hkPlan.adaptiveSlides![i - 1].gammaArchetype;
+  const currArch = hkPlan.adaptiveSlides![i].gammaArchetype;
   assert(
     prevArch !== currArch,
     `Consecutive slides ${i} and ${i + 1} share identical gammaArchetype "${currArch}"`
   );
 }
 
-// 4. Story-First Sequence: First slide is an operational phase (START HERE / CONTROL 01), last slide is CLOSE THE LOOP
+// 4. Gamma 8-Stage Story-First Sequence:
+// Slide 1 is Opening (Operational Purpose & Pre-Shift Readiness)
+// Slide 2 is The Workflow (End-to-End Complete Sequence)
+// Followed by Operational Controls, Decisions, Exceptions, Non-Negotiables, and Final Validation
 assert(
-  hkPlan.adaptiveSlides[0].gammaKicker === 'START HERE' ||
-    hkPlan.adaptiveSlides[0].gammaKicker?.startsWith('CONTROL'),
-  `First slide should start the operational story ("START HERE" or "CONTROL 01"), got "${hkPlan.adaptiveSlides[0].gammaKicker}"`
+  hkPlan.adaptiveSlides![0].gammaKicker?.includes('BEFORE YOU START') ||
+    hkPlan.adaptiveSlides![0].gammaKicker?.includes('OPENING') ||
+    hkPlan.adaptiveSlides![0].gammaKicker === 'START HERE' ||
+    hkPlan.adaptiveSlides![0].gammaKicker?.startsWith('CONTROL'),
+  `First slide should start with Opening/Readiness ("BEFORE YOU START" or "OPENING"), got "${hkPlan.adaptiveSlides![0].gammaKicker}"`
 );
+
+// Slide 2 is End-to-End Process Flow
 assert(
-  hkPlan.adaptiveSlides[hkPlan.adaptiveSlides.length - 1].visualFormat === 'knowledge_check',
-  `Final slide must be the Close the Loop demonstration checkpoint`
+  hkPlan.adaptiveSlides![1].visualFormat === 'process_flow',
+  `Second slide must teach the complete end-to-end process flow first before individual controls, got "${hkPlan.adaptiveSlides![1].visualFormat}"`
 );
-console.log('✅ TEST 13 PASSED: Gamma 4-Stage Training Story, Semantic Micro-Headings, and Auto-Repair verified.\n');
+
+// Final slide is Final Validation / Close the Loop
+assert(
+  hkPlan.adaptiveSlides![hkPlan.adaptiveSlides!.length - 1].visualFormat === 'knowledge_check',
+  `Final slide must be the Final Validation / Close the Loop demonstration checkpoint`
+);
+
+// 5. Progressive Teaching Verification: Every control micro-item has 4 distinct contributions
+// (What to do, How to do it, What to verify, What can go wrong) with zero duplicate text
+const controlSlides = hkPlan.adaptiveSlides!.filter(
+  (s) => s.visualFormat === 'annotated_photo' || s.visualFormat === 'step_demonstration'
+);
+assert(controlSlides.length >= 1, 'At least one operational control slide exists in Housekeeping deck');
+for (const cSlide of controlSlides) {
+  assert(
+    cSlide.gammaMicroItems && cSlide.gammaMicroItems.length >= 2,
+    `Control slide "${cSlide.title}" must provide progressive micro-item contributions`
+  );
+  // Verify zero domain contamination (no debt write-offs or chargebacks in housekeeping)
+  const cSlideText = JSON.stringify(cSlide).toLowerCase();
+  assert(!cSlideText.includes('debt write-off') && !cSlideText.includes('chargeback'), 'Zero financial domain contamination in Housekeeping slide');
+  assert(!/(?:\s+|\.)1\.\s*$/.test(cSlide.title), `Zero stray 1. at end of title: "${cSlide.title}"`);
+}
+
+console.log('✅ TEST 13 PASSED: Gamma 8-Stage Training Story, End-to-End Workflow First, and Progressive Teaching verified.\n');
+
+// ============================================================================
+// TEST 14: HOTEL FRONT DESK CHECK-IN & ORCHID SUITE (PROGRESSIVE TEACHING & ZERO CONTAMINATION)
+// ============================================================================
+console.log('TEST 14: Hotel Front Desk Check-in & Orchid Suite (Zero Contamination, Progressive Teaching & Workflow-First)');
+import { FIXTURE_SOPS } from '../data/fixtureSops';
+
+const hotelFixture = FIXTURE_SOPS.find((s) => s.id === 'canary-hotel-101');
+assert(Boolean(hotelFixture), 'Hotel check-in fixture SOP exists');
+
+const { lesson: hotelCheckinLesson } = generateDomainNeutralLesson({
+  filename: hotelFixture!.filename,
+  rawText: hotelFixture!.content,
+  wordCount: 160,
+  pageCount: 2,
+  fileHash: 'hotel-frontdesk-101',
+  confirmationText: 'Hotel SOP Confirmed',
+  mimeType: 'text/plain',
+  extractedAt: new Date().toISOString(),
+  diagnostics: {} as any,
+});
+
+const hotelDeckPlan = planKnowItSlides(hotelCheckinLesson);
+assert(hotelDeckPlan.adaptiveSlides!.length >= 6, `Hotel deck generates complete adaptive slides (got ${hotelDeckPlan.adaptiveSlides!.length})`);
+assert(hotelDeckPlan.qaReport.isValid === true, 'Hotel check-in deck passes QA source coverage audit');
+
+// 1. Process is not fragmented: End-to-End sequence comes first
+assert(
+  hotelDeckPlan.adaptiveSlides![1].visualFormat === 'process_flow',
+  `Card 2 is the End-to-End Process Flow ("THE WORKFLOW · COMPLETE SEQUENCE"), got "${hotelDeckPlan.adaptiveSlides![1].visualFormat}"`
+);
+
+// 2. Zero Domain Contamination & Zero Stray Trailing 1.
+for (const slide of hotelDeckPlan.adaptiveSlides!) {
+  const slideJson = JSON.stringify(slide).toLowerCase();
+  assert(
+    !slideJson.includes('debt write-off') && !slideJson.includes('chargeback'),
+    `Contaminated accounting terms ("debt write-off" or "chargeback") found in Hotel Check-In slide ${slide.num}: "${slide.title}"`
+  );
+  assert(
+    !/(?:\s+|\.)1\.\s*$/.test(slide.title),
+    `Stray "1." found at the end of slide title: "${slide.title}"`
+  );
+  for (const item of slide.gammaMicroItems || []) {
+    assert(
+      !/(?:\s+|\.)1\.\s*$/.test(item.title) && !/(?:\s+|\.)1\.\s*$/.test(item.body),
+      `Stray "1." found in micro-item: "${item.title}" / "${item.body}"`
+    );
+  }
+}
+
+// 3. Progressive Teaching: Micro-items have distinct non-repetitive contributions
+for (const slide of hotelDeckPlan.adaptiveSlides!) {
+  if (slide.gammaMicroItems && slide.gammaMicroItems.length >= 2) {
+    const titles = slide.gammaMicroItems.map((m: any) => m.title.trim().toLowerCase());
+    const uniqueTitles = new Set(titles);
+    assert(
+      uniqueTitles.size === titles.length,
+      `Slide ${slide.num} ("${slide.title}") has duplicate micro-item titles: ${titles.join(', ')}`
+    );
+  }
+}
+
+console.log('✅ TEST 14 PASSED: Hotel Check-In deck verified with zero contamination, end-to-end workflow first, and progressive teaching.\n');
 
 console.log('================================================================');
-console.log('ALL KNOW-IT PLANNER & RELIABILITY GATE TESTS PASSED (13/13)');
+console.log('ALL KNOW-IT PLANNER & RELIABILITY GATE TESTS PASSED (14/14)');
 console.log('================================================================');
+
 
 
