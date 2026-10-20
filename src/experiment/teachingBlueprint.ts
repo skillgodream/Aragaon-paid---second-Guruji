@@ -188,7 +188,8 @@ export interface QualityIssue {
     | 'UNRELATED_TERMINOLOGY'
     | 'CORRUPTED_TITLE'
     | 'UNSUPPORTED_OPERATIONAL_CLAIM'
-    | 'SEQUENCE_ERROR';
+    | 'SEQUENCE_ERROR'
+    | 'INCORRECT_STAGE_TERMINOLOGY';
   severity: 'BLOCKING' | 'WARNING';
   slideNum?: number;
   description: string;
@@ -1681,21 +1682,54 @@ export function buildAdaptiveDeckFromBlueprint(
       const stepNums = unit.relatedStepNumbers;
       const stepItems = stepNums.map((n) => opSteps[n - 1]).filter(Boolean);
 
-      const cards: AdaptiveSlideCard[] = stepItems.map((s: any, idx) => {
-        const actualStepNum = stepNums[idx];
-        const pair = synthesizeEditorialMicroCopy(s.task_title, s.instruction, undefined, `Stage 0${actualStepNum}`);
-        return sanitizeSlideCardCopy({
-          id: `inv-step-${actualStepNum}`,
-          label: pair.title,
-          value: pair.title,
-          subtext: pair.body,
-          tag: String(actualStepNum).padStart(2, '0'),
-          tagType: s.critical_control ? 'warning' : 'default',
-          why: s.why_it_matters || undefined,
-          sourceRef: s.source?.page_or_section || s.source?.source_ref || `Step ${actualStepNum}`,
-          provenance: 'source_supported',
+      const stageUnits = blueprint.units.filter((u) => Boolean(u.stageTitle || u.stageNumber));
+      const stageCount = stageUnits.length;
+
+      let cards: AdaptiveSlideCard[] = [];
+      if (stageCount > 0 && blueprint.totalSourceSteps > 6) {
+        cards = stageUnits.map((su, idx) => {
+          const actualStageNum = su.stageNumber || idx + 1;
+          const pair = synthesizeEditorialMicroCopy(
+            su.stageTitle || `Stage ${actualStageNum}`,
+            su.whatLearnerMustKnowOrDo || su.learningObjective,
+            undefined,
+            `Stage 0${actualStageNum}`
+          );
+          return sanitizeSlideCardCopy({
+            id: `inv-stage-${actualStageNum}`,
+            label: pair.title,
+            value: pair.title,
+            subtext: pair.body,
+            tag: String(actualStageNum).padStart(2, '0'),
+            tagType: 'default',
+            why: su.difficultyFactor || undefined,
+            sourceRef: su.source?.sourceRef || `Stage ${actualStageNum}`,
+            provenance: 'source_supported',
+          });
         });
-      });
+      } else {
+        cards = stepItems.map((s: any, idx) => {
+          const actualStepNum = stepNums[idx];
+          const pair = synthesizeEditorialMicroCopy(s.task_title, s.instruction, undefined, `Stage 0${actualStepNum}`);
+          return sanitizeSlideCardCopy({
+            id: `inv-step-${actualStepNum}`,
+            label: pair.title,
+            value: pair.title,
+            subtext: pair.body,
+            tag: String(actualStepNum).padStart(2, '0'),
+            tagType: s.critical_control ? 'warning' : 'default',
+            why: s.why_it_matters || undefined,
+            sourceRef: s.source?.page_or_section || s.source?.source_ref || `Step ${actualStepNum}`,
+            provenance: 'source_supported',
+          });
+        });
+      }
+
+      const totalStagesLabel = stageCount > 0 ? stageCount : stepNums.length;
+      const titleText =
+        stageCount > 0
+          ? `Operational sequence: ${stageCount} teaching stages (${blueprint.totalSourceSteps} source steps)`
+          : `Complete ${blueprint.totalSourceSteps}-step operational sequence`;
 
       slides.push({
         num: slideNum,
@@ -1708,14 +1742,11 @@ export function buildAdaptiveDeckFromBlueprint(
         gammaKicker: 'THE JOURNEY',
         gammaArchetype: 'dark_anchor_three_column',
         gammaStopBanner: 'FOLLOW EXACT SEQUENCE · NEVER SKIP VERIFICATION GATES',
-        title:
-          blueprint.totalSourceSteps > 6
-            ? `Operational sequence: Stages ${stepNums[0]} to ${stepNums[stepNums.length - 1]}`
-            : `Complete ${blueprint.totalSourceSteps}-stage operational sequence`,
+        title: titleText,
         subtitle: 'Each stage unlocks the next only when its verification gate is complete.',
         learningObjective: unit.learningObjective,
-        principalTeachingPoint: `Complete Stages ${stepNums[0]} through ${stepNums[stepNums.length - 1]} in order without skipping checks.`,
-        whyItMatters: 'Each step prepares the next one safely and accurately.',
+        principalTeachingPoint: `Complete Stages 1 through ${totalStagesLabel} in order without skipping checks.`,
+        whyItMatters: 'Each stage prepares the next one safely and accurately.',
         takeawayOrQuestion: `Complete each stage in exact order before moving to the next.`,
         cards,
         requiresOperationalPhoto: false,
@@ -2589,6 +2620,44 @@ export function validateAdaptiveDeckAgainstSop(
     }
   }
 
+  // 6. QUALITY CHECK: Stage-Step Conflation & Generic Filler Copy
+  const stageUnits = blueprint.units.filter((u) => Boolean(u.stageTitle || u.stageNumber));
+  const actualStageCount = stageUnits.length || slides.length;
+
+  for (const slide of slides) {
+    const stageMatches = slide.title.match(/stages\s*1\s*(?:to|through|–|-)\s*(\d+)/i);
+    if (stageMatches) {
+      const claimedStageNum = parseInt(stageMatches[1], 10);
+      if (claimedStageNum > actualStageCount + 2) {
+        qualityIssues.push({
+          type: 'INCORRECT_STAGE_TERMINOLOGY',
+          severity: 'BLOCKING',
+          slideNum: slide.num,
+          description: `Stage-step conflation on slide ${slide.num}: Title "${slide.title}" claims ${claimedStageNum} stages, but source steps were grouped into ${actualStageCount} teaching stages.`,
+        });
+      }
+    }
+
+    const GENERIC_FILLER_PATTERNS = [
+      /\bthe\s+picker\s+must\s+work\b/i,
+      /\burgency\s*&\s*speed\b/i,
+    ];
+    for (const card of slide.cards || []) {
+      const combinedCardText = `${card.label || ''} ${card.value || ''} ${card.subtext || ''}`;
+      for (const pattern of GENERIC_FILLER_PATTERNS) {
+        if (pattern.test(combinedCardText)) {
+          qualityIssues.push({
+            type: 'UNSUPPORTED_OPERATIONAL_CLAIM',
+            severity: 'BLOCKING',
+            slideNum: slide.num,
+            description: `Generic ungrounded filler detected on slide ${slide.num} in card "${card.label}": contains generic filler copy.`,
+          });
+          break;
+        }
+      }
+    }
+  }
+
   const formatsUsed = Array.from(new Set(slides.map((s) => s.visualFormat)));
   const opBp = lesson?.operationalBlueprint;
   const hasDecisionsOrExceptions =
@@ -2808,13 +2877,23 @@ export function repairAdaptiveDeck(
     'ci/cd pipeline',
   ];
 
+  // 6. Repair Stage-Step Conflation Titles & Generic Filler Copy
+  const stageUnits = blueprint.units.filter((u) => Boolean(u.stageTitle || u.stageNumber));
+  const stageCount = stageUnits.length || blueprint.totalSourceSteps;
+
   repaired = repaired.map((slide) => {
+    let title = slide.title;
+    if (/stages\s*1\s*(?:to|through|–|-)\s*\d+/i.test(title) && blueprint.totalSourceSteps > stageCount) {
+      title = `Operational sequence: ${stageCount} teaching stages (${blueprint.totalSourceSteps} source steps)`;
+    }
+
     let sub = slide.subtitle || '';
     for (const term of DISALLOWED_TERMS) {
       if (sub.toLowerCase().includes(term)) {
         sub = sub.replace(new RegExp(term, 'gi'), 'standard operational procedure');
       }
     }
+
     const cleansedCards = (slide.cards || []).map((c) => {
       let lbl = c.label || '';
       let val = c.value || '';
@@ -2824,11 +2903,18 @@ export function repairAdaptiveDeck(
         if (val.toLowerCase().includes(term)) val = val.replace(new RegExp(term, 'gi'), 'Standard Procedure');
         if (subtext.toLowerCase().includes(term)) subtext = subtext.replace(new RegExp(term, 'gi'), 'standard procedure');
       }
+
+      if (/\bthe\s+picker\s+must\s+work\b/i.test(val) || /\bthe\s+picker\s+must\s+work\b/i.test(subtext)) {
+        val = 'Operational Equipment Readiness';
+        subtext = 'Confirm all required operational equipment and systems are inspected, verified, and ready before task execution.';
+      }
+
       return { ...c, label: lbl, value: val, subtext };
     });
 
     return {
       ...slide,
+      title,
       subtitle: sub,
       cards: cleansedCards,
     };

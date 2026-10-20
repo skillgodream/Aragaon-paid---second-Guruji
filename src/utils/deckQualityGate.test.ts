@@ -246,6 +246,54 @@ export function runDeckQualityGateTests(): { passed: boolean; testResults: any[]
     details: `Created ${stepTeachingSlides.length} stages (${minStepsOnSingleStage}–${maxStepsOnSingleStage} steps per stage). 17/17 steps covered without overload.`,
   });
 
+  // TEST 10: Detection of Stage-Step Number Conflation ("Stages 1 to 67" when deck has 7 stages) Must FAIL
+  const deckStageConflation = cleanDeck.map((s, idx) =>
+    idx === 1 ? { ...s, title: 'Operational sequence: Stages 1 to 67' } : s
+  );
+  const reportStageConflation = validateAdaptiveDeckAgainstSop(blueprint, deckStageConflation, rawDoc);
+  const test10Passed =
+    reportStageConflation.isValid === false &&
+    reportStageConflation.qualityIssues.some(
+      (q) => q.type === 'INCORRECT_STAGE_TERMINOLOGY' && q.severity === 'BLOCKING'
+    );
+  testResults.push({
+    testName: 'Detection of Stage-Step Conflation ("Stages 1 to 67" in title)',
+    passed: test10Passed,
+    defectCaught: reportStageConflation.qualityIssues.find(
+      (q) => q.type === 'INCORRECT_STAGE_TERMINOLOGY'
+    )?.description,
+  });
+
+  // TEST 11: Detection of Generic Filler Copy ("The picker must work") Must FAIL
+  const deckGenericFiller = cleanDeck.map((s, idx) =>
+    idx === 1
+      ? {
+          ...s,
+          cards: [
+            ...(s.cards || []),
+            {
+              id: 'card-filler',
+              label: 'Equipment Status',
+              value: 'The picker must work',
+              subtext: 'The picker must work properly',
+              provenance: 'illustrative_example' as const,
+            },
+          ],
+        }
+      : s
+  );
+  const reportGenericFiller = validateAdaptiveDeckAgainstSop(blueprint, deckGenericFiller, rawDoc);
+  const test11Passed =
+    reportGenericFiller.isValid === false &&
+    reportGenericFiller.qualityIssues.some((q) => q.severity === 'BLOCKING');
+  testResults.push({
+    testName: 'Detection of Generic Filler Copy ("The picker must work")',
+    passed: test11Passed,
+    defectCaught: reportGenericFiller.qualityIssues.find(
+      (q) => q.description.includes('filler') || q.description.includes('picker')
+    )?.description,
+  });
+
   const allPassed = testResults.every((t) => t.passed);
   return { passed: allPassed, testResults };
 }
@@ -259,6 +307,6 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     if (t.defectCaught) console.log(`       Defect Caught: ${t.defectCaught}`);
     if (t.details) console.log(`       Details: ${t.details}`);
   });
-  console.log(`\nOverall Result: ${res.passed ? 'ALL 9 QUALITY TESTS PASSED' : 'SOME TESTS FAILED'}`);
+  console.log(`\nOverall Result: ${res.passed ? `ALL ${res.testResults.length} QUALITY TESTS PASSED` : 'SOME TESTS FAILED'}`);
   if (!res.passed) process.exit(1);
 }
