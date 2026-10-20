@@ -369,14 +369,14 @@ export async function approveBlueprintAndGenerateDeck(
     process: session.sourceDoc.filename.replace(/\.(pdf|txt|docx)$/i, ''),
     purpose: session.extractionReport?.intendedOutcome || 'Execute operational standard correctly',
     scope: 'Workspace Operations',
-    prerequisites: approvedBlueprint.prerequisites.map((p) => ({
+    prerequisites: (approvedBlueprint.prerequisites || []).map((p) => ({
       text: p.requirement,
       source_ref: p.sourceRef,
       source_text: p.requirement,
     })),
     tools_and_systems: [],
     terminology: [],
-    operational_steps: approvedBlueprint.tasks.map((t) => ({
+    operational_steps: (approvedBlueprint.tasks || (approvedBlueprint as any).units || []).map((t) => ({
       instruction: t.instruction,
       category: t.category,
       action_verb: t.actionVerb,
@@ -389,21 +389,21 @@ export async function approveBlueprintAndGenerateDeck(
         source_text: t.sourceText,
       },
     })),
-    decision_points: approvedBlueprint.decisionPoints.map((d) => ({
+    decision_points: (approvedBlueprint.decisionPoints || []).map((d) => ({
       situation: d.situation,
       decision: d.decision,
       action: d.action,
       source_ref: d.sourceRef,
       source_text: d.situation,
     })),
-    exceptions: approvedBlueprint.exceptions.map((e) => ({
+    exceptions: (approvedBlueprint.exceptions || []).map((e) => ({
       trigger: e.trigger,
       resolution: e.resolution,
       source_ref: e.sourceRef,
       source_text: e.trigger,
     })),
     escalations: [],
-    critical_controls: approvedBlueprint.criticalControls.map((c) => ({
+    critical_controls: (approvedBlueprint.criticalControls || []).map((c) => ({
       rule: c.rule,
       rationale: c.rationale,
       source_ref: c.sourceRef,
@@ -660,6 +660,39 @@ function buildLocalLearningBlueprint(session: ProgressiveSopSession): LearningBl
   let taskReqs = reqs.filter((r) => r.type === 'task');
   if (taskReqs.length === 0 && reqs.length > 0) {
     taskReqs = reqs;
+  }
+  if (taskReqs.length === 0) {
+    const rawLines = (session.sourceDoc?.rawText || '')
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => /^\d+[\.\)]/i.test(l) || /^(?:step|verify|perform|check|arrive|inspect)/i.test(l));
+    if (rawLines.length > 0) {
+      taskReqs = rawLines.map((line, idx) => ({
+        id: `req-extracted-${idx + 1}`,
+        title: line.replace(/^\d+[\.\)]\s*/, '').slice(0, 40) || `Task ${idx + 1}`,
+        instruction: line.replace(/^\d+[\.\)]\s*/, '') || `Execute step ${idx + 1}`,
+        category: 'DO',
+        isCriticalControl: false,
+        sourceRef: `Section ${idx + 1}`,
+        sourceText: line,
+        provenance: 'VERBATIM_SOURCE',
+        type: 'task',
+      }));
+    } else {
+      taskReqs = [
+        {
+          id: 'req-default-1',
+          title: 'Verify Operational Order Details',
+          instruction: 'Verify order and item details accurately prior to starting execution.',
+          category: 'DO',
+          isCriticalControl: true,
+          sourceRef: 'Section 1',
+          sourceText: session.sourceDoc?.filename || 'SOP Instruction',
+          provenance: 'VERBATIM_SOURCE',
+          type: 'task',
+        },
+      ];
+    }
   }
 
   const tasks: BlueprintTaskItem[] = taskReqs.map((r, idx) => ({

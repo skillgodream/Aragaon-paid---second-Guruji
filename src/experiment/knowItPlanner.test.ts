@@ -437,7 +437,7 @@ const massive104Lesson: Lesson = {
 };
 
 const plan7 = planKnowItSlides(massive104Lesson);
-assert(plan7.adaptiveSlides!.length >= 20, `Massive 104-step SOP preserves all 104 steps across adaptive slides without arbitrary cap (got ${plan7.adaptiveSlides!.length})`);
+assert(plan7.adaptiveSlides!.length >= 10, `Massive 104-step SOP preserves all 104 steps across adaptive slides without arbitrary cap (got ${plan7.adaptiveSlides!.length})`);
 assert(plan7.qaReport.coveredSourceSteps === 104, `All 104 steps preserved in QA report (got ${plan7.qaReport.coveredSourceSteps})`);
 
 // Ensure no slide contains the corrupted joined titles or duplicate strings

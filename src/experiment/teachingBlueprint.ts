@@ -137,6 +137,7 @@ export interface AdaptiveSlideCard {
   consequence?: string;
   sourceRef?: string;
   provenance?: 'source_supported' | 'illustrative_example';
+  stepNum?: number;
 }
 
 export interface AdaptiveDeckSlide {
@@ -650,6 +651,23 @@ function extractNormalizedSopSources(lesson?: Lesson, plan?: SlidePlan, fallback
     },
   }));
 
+  const explicitRawStepFallbacks = (
+    ((lesson as any)?.raw_steps || (lesson as any)?.steps || (lesson as any)?.slides || []) as any[]
+  ).map((rs: any, idx: number) => ({
+    stepNumber: rs.step_number || rs.stepNumber || idx + 1,
+    task_title: rs.task_title || rs.title || rs.action_verb || `Step ${idx + 1}`,
+    action_verb: rs.action_verb || (rs.task_title || rs.title || 'Execute').split(' ')[0] || 'Execute',
+    instruction: rs.instruction || rs.taskItem || rs.why || rs.description || `Execute step ${idx + 1}`,
+    why_it_matters: rs.why_it_matters || rs.expectedOutcome || rs.why || `Ensures accurate execution of ${sopTitle}.`,
+    category: rs.category || 'DO',
+    critical_control: rs.critical_control || rs.criticalControl,
+    source: rs.source || {
+      page_or_section: rs.phase || rs.stage || rs.section || `Section ${idx + 1}`,
+      source_ref: rs.source_ref || `SOP Step ${idx + 1}`,
+      source_text: rs.instruction || rs.description || '',
+    },
+  }));
+
   const rawSteps: any[] = opBlueprint?.operational_steps?.length
     ? opBlueprint.operational_steps
     : stepObjectFallbacks.length
@@ -658,7 +676,9 @@ function extractNormalizedSopSources(lesson?: Lesson, plan?: SlidePlan, fallback
     ? watchStepFallbacks
     : kmStepFallbacks.length
     ? kmStepFallbacks
-    : ctmStepFallbacks;
+    : ctmStepFallbacks.length
+    ? ctmStepFallbacks
+    : explicitRawStepFallbacks;
 
   const prereqs: any[] = opBlueprint?.prerequisites?.length
     ? opBlueprint.prerequisites
@@ -775,104 +795,195 @@ interface OperationalStageCluster {
   isHighCriticality: boolean;
   hasThresholds: boolean;
   hasConditionals: boolean;
+  teachingDepth: 'deep_dive' | 'balanced' | 'micro_checkpoint';
+  pedagogicalRationale: string;
 }
 
 /**
- * Stage-Aware Operational Planner:
- * Analyzes the workflow, detects natural operational sections and functional phases,
- * and groups related tasks into cohesive stages without arbitrary mathematical chunking.
+ * Stage-Aware Cognitive Instructional Planner:
+ * Analyzes the workflow, partitions tasks into natural cognitive stages (2-4 steps per stage),
+ * retains decisions and exceptions, and determines how much teaching each step needs.
+ * Replaces mechanical chunking with multi-signal semantic workflow pacing.
  */
 function clusterStepsIntoOperationalStages(rawSteps: any[], sopTitle: string): OperationalStageCluster[] {
   if (!rawSteps || rawSteps.length === 0) return [];
 
-  interface RawStageBucket {
-    rawKey: string;
-    stageTitle: string;
-    steps: any[];
-    stepNums: number[];
+  const N = rawSteps.length;
+  // Calculate optimal stage count: 2 to 4 steps per cognitive chunk
+  const targetStageCount = N <= 3 ? 1 : N <= 6 ? 2 : N <= 10 ? 3 : N <= 15 ? 4 : Math.min(6, Math.ceil(N / 3.5));
+
+  interface PreParsedStep {
+    step: any;
+    stepNum: number;
+    section: string;
+    actionVerb: string;
+    text: string;
   }
 
-  const buckets: RawStageBucket[] = [];
-  let current: RawStageBucket | null = null;
-
-  rawSteps.forEach((s, idx) => {
+  const parsedSteps: PreParsedStep[] = rawSteps.map((s, idx) => {
     const rawSec = s.source?.page_or_section || s.source?.section || s.phase || s.stage || '';
-    // Strip common section prefix like "Section 1: " or "Page 2 · "
-    let cleanSec = rawSec
+    const cleanSec = rawSec
       .replace(/^(?:Page\s*\d+\s*[·\-\—]\s*|Section\s*\d+[\s:\.\-\—]*)/i, '')
       .replace(/^Stage\s*\d+[\s:\.\-\—]*/i, '')
       .trim();
-
-    // If no section string, infer functional stage
-    if (!cleanSec) {
-      const cat = (s.category || '').toUpperCase();
-      if (cat === 'PREPARE' || (cat === 'CHECK' && idx < 3)) {
-        cleanSec = 'Preparation & Pre-Checks';
-      } else if (cat === 'FINAL_CHECK' || cat === 'CLOSE' || idx >= rawSteps.length - 2) {
-        cleanSec = 'Final Verification & Handover';
-      } else {
-        cleanSec = 'Operational Execution';
-      }
-    }
-
-    const stageKey = cleanSec.toLowerCase();
-
-    if (!current || current.rawKey !== stageKey) {
-      current = {
-        rawKey: stageKey,
-        stageTitle: cleanSec,
-        steps: [s],
-        stepNums: [idx + 1],
-      };
-      buckets.push(current);
-    } else {
-      current.steps.push(s);
-      current.stepNums.push(idx + 1);
-    }
+    const actionVerb = (s.action_verb || (s.task_title || s.instruction || '').split(' ')[0] || 'Perform').trim();
+    const text = `${s.task_title || ''} ${s.instruction || ''} ${s.why_it_matters || ''}`.trim();
+    return {
+      step: s,
+      stepNum: idx + 1,
+      section: cleanSec,
+      actionVerb,
+      text,
+    };
   });
 
-  // Coalesce adjacent micro-stages if count > 6 to preserve cohesive operational arc
-  let merged = [...buckets];
-  if (merged.length > 6) {
-    const compacted: RawStageBucket[] = [];
-    for (let i = 0; i < merged.length; i++) {
-      const curr = merged[i];
-      const next = merged[i + 1];
-      if (curr.steps.length === 1 && next && compacted.length + (merged.length - i) > 6) {
-        compacted.push({
-          rawKey: `${curr.rawKey}_${next.rawKey}`,
-          stageTitle: `${curr.stageTitle} & ${next.stageTitle}`.replace(/\s+and\s+/gi, ' & '),
-          steps: [...curr.steps, ...next.steps],
-          stepNums: [...curr.stepNums, ...next.stepNums],
-        });
-        i++; // skip next since merged
+  const distinctSections = Array.from(new Set(parsedSteps.map((p) => p.section).filter(Boolean)));
+  const hasRichSectionTags = distinctSections.length >= 2 && distinctSections.length <= 8;
+
+  let rawClusters: { title: string; steps: any[]; stepNums: number[] }[] = [];
+
+  if (hasRichSectionTags) {
+    let currentSec = '';
+    let currentBucket: { title: string; steps: any[]; stepNums: number[] } | null = null;
+
+    parsedSteps.forEach((p) => {
+      const secKey = p.section || 'Operational Stage';
+      if (!currentBucket || currentSec !== secKey || currentBucket.steps.length >= 4) {
+        currentSec = secKey;
+        const subIndex = currentBucket && currentSec === secKey ? ' (Part 2)' : '';
+        currentBucket = {
+          title: `${secKey}${subIndex}`,
+          steps: [p.step],
+          stepNums: [p.stepNum],
+        };
+        rawClusters.push(currentBucket);
+      } else {
+        currentBucket.steps.push(p.step);
+        currentBucket.stepNums.push(p.stepNum);
+      }
+    });
+  } else {
+    // Multi-Signal Semantic Workflow Partitioning
+    const maxStepsPerStage = Math.max(2, Math.ceil(N / targetStageCount));
+
+    const detectPhaseAffinity = (text: string, idx: number): string => {
+      const lower = text.toLowerCase();
+      if (idx === 0 || /knock|enter|announce|priority|assignment|prepare|cart|trolley|don\b|ppe|setup/i.test(lower)) {
+        return 'setup';
+      }
+      if (/strip|trash|empty|waste|linen|clear|remove|dispose|take out|laundry/i.test(lower)) {
+        return 'clearance';
+      }
+      if (/spray|dwell|disinfect|sanitiz|chemical|soak|rinse|scrub|wipe|wash|clean/i.test(lower)) {
+        return 'treatment';
+      }
+      if (/remake|bed|corners|replace|restock|amenities|towel|dust|vacuum|mop|align|station/i.test(lower)) {
+        return 'reset';
+      }
+      if (idx >= N - 2 || /inspect|verify|check|odor|damage|defect|report|lock|thermostat|departure|handover/i.test(lower)) {
+        return 'verification';
+      }
+      return 'execution';
+    };
+
+    let currentPhase = '';
+    let currentBucket: { title: string; steps: any[]; stepNums: number[] } | null = null;
+
+    parsedSteps.forEach((p, idx) => {
+      const stepPhase = detectPhaseAffinity(p.text, idx);
+      const mustSplit =
+        currentBucket &&
+        (currentBucket.steps.length >= maxStepsPerStage ||
+          (currentBucket.steps.length >= 2 && currentPhase !== stepPhase));
+
+      if (!currentBucket || mustSplit) {
+        currentPhase = stepPhase;
+        currentBucket = {
+          title: '',
+          steps: [p.step],
+          stepNums: [p.stepNum],
+        };
+        rawClusters.push(currentBucket);
+      } else {
+        currentBucket.steps.push(p.step);
+        currentBucket.stepNums.push(p.stepNum);
+      }
+    });
+  }
+
+  // Eliminate single-step micro-stages without crude '&' concatenation
+  if (rawClusters.length > 1) {
+    const compacted: typeof rawClusters = [];
+    for (let i = 0; i < rawClusters.length; i++) {
+      const curr = rawClusters[i];
+      if (curr.steps.length === 1 && i < rawClusters.length - 1 && rawClusters[i + 1].steps.length <= 3) {
+        rawClusters[i + 1].steps.unshift(...curr.steps);
+        rawClusters[i + 1].stepNums.unshift(...curr.stepNums);
+      } else if (curr.steps.length === 1 && compacted.length > 0 && compacted[compacted.length - 1].steps.length <= 3) {
+        compacted[compacted.length - 1].steps.push(...curr.steps);
+        compacted[compacted.length - 1].stepNums.push(...curr.stepNums);
       } else {
         compacted.push(curr);
       }
     }
-    merged = compacted;
+    rawClusters = compacted;
   }
 
-  // Format into final clusters with pedagogical metadata
-  return merged.map((b, idx) => {
+  // Synthesize crisp, professional, domain-authentic stage titles
+  const synthesizeStageTitle = (cluster: { title: string; steps: any[]; stepNums: number[] }, stageIndex: number): string => {
+    if (cluster.title && !cluster.title.includes('&') && cluster.title.length > 6 && !/operational execution/i.test(cluster.title)) {
+      return cluster.title;
+    }
+
+    const verbs = cluster.steps
+      .map((s) => s.action_verb || (s.task_title || s.instruction || '').split(' ')[0] || '')
+      .filter((v) => v.length > 2 && !/^(?:step|execute|perform|do)$/i.test(v));
+    const primaryVerb = verbs[0] || 'Execute';
+    const secondaryVerb = verbs[1] && verbs[1].toLowerCase() !== primaryVerb.toLowerCase() ? verbs[1] : '';
+
+    const firstTitle = cluster.steps[0]?.task_title || cluster.steps[0]?.instruction || '';
+    const nounMatch = firstTitle.replace(/^(?:step\s*\d+[\s:\-]*|[a-z]+\s+)/i, '').split(/[,\.\—\-\:\(\)]/)[0]?.trim();
+    const cleanNoun = nounMatch && nounMatch.length <= 30 ? nounMatch : 'Workflow Procedure';
+
+    if (secondaryVerb) {
+      return `${primaryVerb} & ${secondaryVerb}: ${cleanNoun}`;
+    }
+    return `${primaryVerb} ${cleanNoun}`;
+  };
+
+  return rawClusters.map((b, idx) => {
     const stageNum = idx + 1;
+    const stageTitle = sanitizeLearnerText(synthesizeStageTitle(b, stageNum));
     const combinedText = b.steps
       .map((s: any) => `${s.task_title || ''} ${s.instruction || ''} ${s.why_it_matters || ''}`)
       .join(' ');
+
     const isHighCriticality = b.steps.some(
-      (s: any) => s.critical_control || /never|safety|hazard|ppe|chemical|privacy|lock|stop/i.test(s.instruction || '')
+      (s: any) => s.critical_control || /never|safety|hazard|ppe|chemical|privacy|lock|stop|high voltage|biohazard/i.test(s.instruction || '')
     );
     const hasThresholds = THRESHOLD_DATA_REGEX.test(combinedText);
     const hasConditionals = CONDITIONAL_STEP_REGEX.test(combinedText);
 
+    const teachingDepth: 'deep_dive' | 'balanced' | 'micro_checkpoint' = isHighCriticality || hasConditionals
+      ? 'deep_dive'
+      : 'balanced';
+
+    const pedagogicalRationale = isHighCriticality
+      ? `High-risk operational stage requiring deliberate pace, error boundaries, and verification criteria.`
+      : hasConditionals
+      ? `Decision-dense stage requiring scenario branching and condition verification.`
+      : `Core procedural execution stage balancing instructional clarity with concise operational pacing.`;
+
     return {
       stageNum,
-      stageTitle: b.stageTitle,
+      stageTitle,
       steps: b.steps,
       stepNums: b.stepNums,
       isHighCriticality,
       hasThresholds,
       hasConditionals,
+      teachingDepth,
+      pedagogicalRationale,
     };
   });
 }
@@ -1284,10 +1395,22 @@ function repairAndVerifyEditorialSlides(slides: AdaptiveDeckSlide[]): AdaptiveDe
     'non_negotiable_ledger',
   ];
   let prevArchetype: GammaCardArchetype | undefined;
+  const seenSlideTitles = new Map<string, number>();
 
   return slides.map((slide, idx) => {
-    const cleanTitle = sanitizeLearnerText(slide.title) || slide.title;
+    let cleanTitle = sanitizeLearnerText(slide.title) || slide.title;
     const cleanSubtitle = sanitizeLearnerText(slide.subtitle);
+
+    const normTitle = cleanTitle.toLowerCase().trim().replace(/^(?:stage\s*\d+[\s:\.\-\—]*|card\s*\d+[\s:\.\-\—]*)/i, '');
+    if (normTitle.length > 5) {
+      if (seenSlideTitles.has(normTitle)) {
+        const occ = seenSlideTitles.get(normTitle)! + 1;
+        seenSlideTitles.set(normTitle, occ);
+        cleanTitle = `${cleanTitle} (Part ${occ})`;
+      } else {
+        seenSlideTitles.set(normTitle, 1);
+      }
+    }
 
     let resolvedArchetype: GammaCardArchetype = slide.gammaArchetype || 'ledger_with_stop_banner';
     if (prevArchetype && resolvedArchetype === prevArchetype && resolvedArchetype !== 'interactive_mastery_gate') {
@@ -2177,15 +2300,12 @@ export function buildAdaptiveDeckFromBlueprint(
 
 /**
  * STEP 6: Validates the generated Adaptive Training Deck against the source SOP before delivery.
- */
-/**
- * STEP 6: Validates the generated Adaptive Training Deck against the source SOP before delivery.
  * Enforces the 5-Pillar Quality Gate:
- * 1. Missing required operational actions & controls
+ * 1. Missing required operational actions & controls (100% source coverage)
  * 2. Repeated explanations & duplicate slide titles
- * 3. Unrelated cross-domain terminology & hallucinations
+ * 3. Unrelated cross-domain terminology & dynamic hallucinations
  * 4. Corrupted, truncated or malformed titles
- * 5. Unsupported operational claims
+ * 5. Unsupported operational claims & cross-slide sequence preservation
  */
 export function validateAdaptiveDeckAgainstSop(
   blueprint: TeachingBlueprint,
@@ -2195,26 +2315,18 @@ export function validateAdaptiveDeckAgainstSop(
   const totalSteps = blueprint.totalSourceSteps;
   const coveredSet = new Set<number>();
   const coveredInventorySet = new Set<string>();
-  const sequenceEncountered: number[] = [];
   const qualityIssues: QualityIssue[] = [];
 
   for (const slide of slides) {
-    if (slide.visualFormat === 'process_flow') {
-      for (const stepNum of slide.coveredStepNumbers) {
-        coveredSet.add(stepNum);
-        sequenceEncountered.push(stepNum);
-      }
-    } else {
-      for (const stepNum of slide.coveredStepNumbers) {
-        coveredSet.add(stepNum);
-      }
+    for (const stepNum of slide.coveredStepNumbers || []) {
+      coveredSet.add(stepNum);
     }
-
     for (const invId of slide.coveredInventoryIds || []) {
       coveredInventorySet.add(invId);
     }
     for (const card of slide.cards || []) {
       if (card.id) coveredInventorySet.add(card.id);
+      if (card.stepNum) coveredSet.add(card.stepNum);
     }
   }
 
@@ -2238,17 +2350,54 @@ export function validateAdaptiveDeckAgainstSop(
     });
   }
 
-  // Sequence verification
+  // Sequence verification (Global across ALL slides and visual formats)
   let sequencePreserved = true;
-  for (let i = 1; i < sequenceEncountered.length; i++) {
-    if (sequenceEncountered[i] <= sequenceEncountered[i - 1]) {
+
+  // A. Intra-slide sequence check: within any single slide, steps must be strictly ascending
+  for (const slide of slides) {
+    const steps = slide.coveredStepNumbers || [];
+    for (let i = 1; i < steps.length; i++) {
+      if (steps[i] <= steps[i - 1]) {
+        sequencePreserved = false;
+        qualityIssues.push({
+          type: 'SEQUENCE_ERROR',
+          severity: 'BLOCKING',
+          slideNum: slide.num,
+          description: `Intra-slide sequence inversion on slide ${slide.num} ("${slide.title}"): Step ${steps[i]} appears after Step ${steps[i - 1]}.`,
+        });
+        break;
+      }
+    }
+  }
+
+  // B. Inter-slide sequence check across detailed operational slides
+  // Exclude whole-deck overviews (> 70% of total steps, process_flow overview, or final quiz)
+  const isOverviewSlide = (s: AdaptiveDeckSlide) =>
+    (s.coveredStepNumbers?.length || 0) >= Math.max(3, totalSteps * 0.7) ||
+    s.visualFormat === 'process_flow' ||
+    s.visualFormat === 'knowledge_check';
+
+  const detailedExecutionSlides = slides.filter((s) => !isOverviewSlide(s) && (s.coveredStepNumbers?.length || 0) > 0);
+
+  let highestStepSeen = 0;
+  let highestStepSlideNum = 0;
+
+  for (const slide of detailedExecutionSlides) {
+    const minStepOnSlide = Math.min(...slide.coveredStepNumbers);
+    if (minStepOnSlide < highestStepSeen) {
       sequencePreserved = false;
       qualityIssues.push({
         type: 'SEQUENCE_ERROR',
         severity: 'BLOCKING',
-        description: `Operational sequence inversion detected: Step ${sequenceEncountered[i]} encountered after Step ${sequenceEncountered[i - 1]}.`,
+        slideNum: slide.num,
+        description: `Operational sequence inversion across slides: Slide ${slide.num} ("${slide.title}") introduces Step ${minStepOnSlide}, but prior Slide ${highestStepSlideNum} already advanced to Step ${highestStepSeen}.`,
       });
       break;
+    }
+    const maxOnSlide = Math.max(...slide.coveredStepNumbers);
+    if (maxOnSlide > highestStepSeen) {
+      highestStepSeen = maxOnSlide;
+      highestStepSlideNum = slide.num;
     }
   }
 
@@ -2304,49 +2453,61 @@ export function validateAdaptiveDeckAgainstSop(
   const noRepeatedExplanations = !hasDuplicateTitles;
 
   // 3. QUALITY CHECK: Unrelated Terminology & Cross-Domain Hallucinations
-  const FINANCE_JARGON = [
-    'ebitda',
-    'derivatives',
-    'ledger reconciliation',
-    'fiscal quarter',
-    'portfolio hedge',
-    'arbitrage',
-    'equity swap',
-    'debt underwriting',
-    'balance sheet reconciliation',
+  const DOMAIN_PROFILES = [
+    {
+      domainName: 'Finance & Accounting',
+      discriminator: /finance|accounting|ledger|audit|tax|payroll|balance\s*sheet/i,
+      terms: ['ebitda', 'derivatives', 'ledger reconciliation', 'fiscal quarter', 'portfolio hedge', 'arbitrage', 'equity swap', 'debt underwriting', 'balance sheet reconciliation'],
+    },
+    {
+      domainName: 'Clinical & Phlebotomy',
+      discriminator: /phlebotomy|blood|venipuncture|clinical|pathology|hematology/i,
+      terms: ['phlebotomy', 'venipuncture', 'centrifuge', 'vacutainer', 'blood vial', 'intubation', 'cannula', 'anesthesia'],
+    },
+    {
+      domainName: 'Aviation & Flight Operations',
+      discriminator: /aviation|aircraft|flight|cockpit|pilot|avionics/i,
+      terms: ['avionics', 'altimeter', 'transponder', 'rudder pitch', 'flaps 20', 'cockpit yaw', 'atc clearance'],
+    },
+    {
+      domainName: 'Software DevOps & Cloud',
+      discriminator: /software|devops|kubernetes|docker|cloud\s*sql|database/i,
+      terms: ['kubernetes pod', 'docker container', 'ci/cd pipeline', 'sql injection', 'git rebase', 'pull request'],
+    },
   ];
+
   const deckFullText = JSON.stringify(slides).toLowerCase();
-  const isFinanceDoc =
-    (blueprint.sopTitle + ' ' + (lesson?.description || '')).toLowerCase().includes('finance') ||
-    (blueprint.sopTitle + ' ' + (lesson?.description || '')).toLowerCase().includes('accounting') ||
-    (blueprint.sopTitle + ' ' + (lesson?.description || '')).toLowerCase().includes('ledger');
+  const rawStepsText = ((lesson as any)?.raw_steps || (lesson as any)?.steps || [])
+    .map((s: any) => `${s.task_title || s.title || ''} ${s.instruction || s.description || ''} ${s.text || ''}`)
+    .join(' ');
+
+  const sourceFullText = (
+    blueprint.sopTitle +
+    ' ' +
+    blueprint.role +
+    ' ' +
+    blueprint.purpose +
+    ' ' +
+    inventory.map((i) => i.text).join(' ') +
+    ' ' +
+    (lesson?.sourceMeta?.rawText || '') +
+    ' ' +
+    rawStepsText
+  ).toLowerCase();
 
   let hasUnrelatedTerm = false;
-  if (!isFinanceDoc) {
-    for (const term of FINANCE_JARGON) {
-      if (deckFullText.includes(term)) {
-        hasUnrelatedTerm = true;
-        qualityIssues.push({
-          type: 'UNRELATED_TERMINOLOGY',
-          severity: 'BLOCKING',
-          description: `Unrelated finance terminology detected in operational deck: "${term}".`,
-        });
-      }
-    }
-  }
-
-  // Cross-domain mismatch check for hospitality
-  const isHospitality = /hotel|housekeeping|guest|linen|room\s*attendant|trolley/i.test(blueprint.sopTitle + ' ' + blueprint.role);
-  if (isHospitality) {
-    const clinicalTerms = ['phlebotomy', 'venipuncture', 'centrifuge', 'vacutainer', 'blood vial'];
-    for (const term of clinicalTerms) {
-      if (deckFullText.includes(term)) {
-        hasUnrelatedTerm = true;
-        qualityIssues.push({
-          type: 'UNRELATED_TERMINOLOGY',
-          severity: 'BLOCKING',
-          description: `Cross-domain clinical terminology hallucinated in hospitality deck: "${term}".`,
-        });
+  for (const profile of DOMAIN_PROFILES) {
+    const isSourceInDomain = profile.discriminator.test(sourceFullText);
+    if (!isSourceInDomain) {
+      for (const term of profile.terms) {
+        if (deckFullText.includes(term.toLowerCase())) {
+          hasUnrelatedTerm = true;
+          qualityIssues.push({
+            type: 'UNRELATED_TERMINOLOGY',
+            severity: 'BLOCKING',
+            description: `Unrelated ${profile.domainName} terminology detected in operational deck: "${term}".`,
+          });
+        }
       }
     }
   }
@@ -2376,9 +2537,13 @@ export function validateAdaptiveDeckAgainstSop(
   const noCorruptedTitles = !hasCorruptedTitles;
 
   // 5. QUALITY CHECK: Unsupported Operational Claims
+  // Rigorously verifies that operational assertions, timeframes, and thresholds are grounded in source
   let hasUnsupportedClaims = false;
+  const QUANTITATIVE_REGEX = /\b(\d+(?:\.\d+)?)\s*(minutes?|mins?|seconds?|secs?|hours?|hrs?|degrees?|°[cf]?|celsius|fahrenheit|ppm|psi|bar|liters?|ml|oz|volts?|amps?)\b/gi;
+
   for (const slide of slides) {
     for (const card of slide.cards || []) {
+      // Check illustrative card provenance
       if (card.provenance === 'illustrative_example' && !card.sourceRef) {
         hasUnsupportedClaims = true;
         qualityIssues.push({
@@ -2387,6 +2552,23 @@ export function validateAdaptiveDeckAgainstSop(
           slideNum: slide.num,
           description: `Card "${card.label}" lacks verified source provenance citation.`,
         });
+      }
+
+      // Check numeric thresholds asserted in cards against source text
+      const cardText = `${card.label} ${card.value || ''} ${card.subtext || ''}`;
+      const quantMatches = cardText.matchAll(QUANTITATIVE_REGEX);
+      for (const qm of quantMatches) {
+        const fullThreshold = qm[0].toLowerCase();
+        const numValue = qm[1];
+        if (!sourceFullText.includes(fullThreshold) && !sourceFullText.includes(numValue)) {
+          hasUnsupportedClaims = true;
+          qualityIssues.push({
+            type: 'UNSUPPORTED_OPERATIONAL_CLAIM',
+            severity: 'BLOCKING',
+            slideNum: slide.num,
+            description: `Unsupported quantitative operational threshold in Card "${card.label}": "${fullThreshold}" is not supported by source SOP.`,
+          });
+        }
       }
     }
   }
@@ -2459,4 +2641,202 @@ export function validateAdaptiveDeckAgainstSop(
       ? `PASSED QUALITY GATE: ${coveredSet.size}/${totalSteps} mandatory steps and ${coveredInventorySet.size}/${inventory.length} source inventory items verified across ${slides.length} slides (${formatsUsed.length} visual formats, 0 blocking defects).`
       : `FAILED QUALITY GATE: ${blockingCount} blocking defect(s), ${warningCount} warning(s) detected.`,
   };
+}
+
+/**
+ * Automated Pedagogical Deck Repair Engine:
+ * Takes an invalid deck flagged by the Quality Gate and deterministically repairs:
+ * 1. Missing mandatory operational actions (re-injects omitted steps into correct stages)
+ * 2. Sequence inversions (restores monotonic step progression intra-slide and inter-slide)
+ * 3. Corrupted or truncated titles (removes dangling words, regenerates crisp titles)
+ * 4. Hallucinated cross-domain terms & unsupported claims (re-aligns copy with source SOP)
+ */
+export function repairAdaptiveDeck(
+  blueprint: TeachingBlueprint,
+  slides: AdaptiveDeckSlide[],
+  report: DeckQualityAssuranceReport
+): AdaptiveDeckSlide[] {
+  let repaired = slides.map((s) => ({
+    ...s,
+    coveredStepNumbers: [...(s.coveredStepNumbers || [])],
+    cards: [...(s.cards || [])],
+  }));
+
+  // 1. Repair Corrupted Titles
+  const DANGLING_TITLE_REGEX = /(?:\s+(?:to|and|with|for|the|or|in|on|at|by|from)\s*\.?$|\.{2,}$|\.\s*$)/i;
+  const UNPARSED_HEADER_REGEX = /^(?:sop\s*[\:\-\—]|document ref|role\s*[\:\-\—]|purpose\s*[\:\-\—])/i;
+  const STRAY_NUMBERING_REGEX = /\b(?:\.\.\.\s*\d+|\s+[—–]\s*\d+\.?)$/;
+
+  repaired = repaired.map((slide) => {
+    let cleanTitle = slide.title;
+    if (
+      DANGLING_TITLE_REGEX.test(cleanTitle) ||
+      UNPARSED_HEADER_REGEX.test(cleanTitle) ||
+      STRAY_NUMBERING_REGEX.test(cleanTitle)
+    ) {
+      cleanTitle = cleanTitle
+        .replace(UNPARSED_HEADER_REGEX, '')
+        .replace(DANGLING_TITLE_REGEX, '')
+        .replace(STRAY_NUMBERING_REGEX, '')
+        .trim();
+      if (cleanTitle.length < 5) {
+        cleanTitle = `Stage ${slide.num}: Operational Execution`;
+      }
+    }
+    return { ...slide, title: cleanTitle };
+  });
+
+  // 2. Repair Duplicate Titles
+  const seenTitles = new Map<string, number>();
+  repaired = repaired.map((slide) => {
+    const norm = slide.title.toLowerCase().trim().replace(/^(?:stage\s*\d+[\s:\.\-\—]*|card\s*\d+[\s:\.\-\—]*)/i, '');
+    if (seenTitles.has(norm)) {
+      const occ = seenTitles.get(norm)! + 1;
+      seenTitles.set(norm, occ);
+      return {
+        ...slide,
+        title: `${slide.title} (Part ${occ})`,
+      };
+    } else {
+      seenTitles.set(norm, 1);
+      return slide;
+    }
+  });
+
+  // 3. Repair Sequence Inversions
+  // a) Sort intra-slide steps
+  repaired = repaired.map((slide) => {
+    if (slide.coveredStepNumbers && slide.coveredStepNumbers.length > 1) {
+      return {
+        ...slide,
+        coveredStepNumbers: [...slide.coveredStepNumbers].sort((a, b) => a - b),
+      };
+    }
+    return slide;
+  });
+
+  // b) Sort detailed operational slides by minimum step number
+  const totalSteps = blueprint.totalSourceSteps;
+  const isOverview = (s: AdaptiveDeckSlide) =>
+    (s.coveredStepNumbers?.length || 0) >= totalSteps * 0.7 ||
+    s.visualFormat === 'process_flow' ||
+    s.visualFormat === 'checklist' ||
+    s.visualFormat === 'knowledge_check';
+
+  const overviewSlides = repaired.filter(isOverview);
+  const detailSlides = repaired.filter((s) => !isOverview(s));
+
+  if (detailSlides.length > 1) {
+    detailSlides.sort((a, b) => {
+      const minA = a.coveredStepNumbers.length ? Math.min(...a.coveredStepNumbers) : 999;
+      const minB = b.coveredStepNumbers.length ? Math.min(...b.coveredStepNumbers) : 999;
+      return minA - minB;
+    });
+
+    const openingSlides = repaired.filter(
+      (s) => s.visualFormat === 'checklist' || (s.visualFormat === 'process_flow' && s.num <= 3)
+    );
+    const closingSlides = repaired.filter(
+      (s) => s.visualFormat === 'knowledge_check' || (s.visualFormat === 'structured_table' && s.num > detailSlides.length)
+    );
+
+    if (openingSlides.length + detailSlides.length + closingSlides.length === repaired.length) {
+      repaired = [...openingSlides, ...detailSlides, ...closingSlides];
+    }
+  }
+
+  // 4. Repair Missing Required Actions
+  const currentCovered = new Set<number>();
+  repaired.forEach((s) => (s.coveredStepNumbers || []).forEach((n) => currentCovered.add(n)));
+  const missingSteps: number[] = [];
+  for (let s = 1; s <= totalSteps; s++) {
+    if (!currentCovered.has(s)) missingSteps.push(s);
+  }
+
+  if (missingSteps.length > 0) {
+    const rawInventory = blueprint.contentInventory || [];
+    missingSteps.forEach((missingNum) => {
+      let targetSlide = repaired.find((s) => s.coveredStepNumbers?.includes(missingNum - 1) && !isOverview(s));
+      if (!targetSlide) {
+        targetSlide = repaired.find((s) => s.coveredStepNumbers?.includes(missingNum + 1) && !isOverview(s));
+      }
+      if (!targetSlide) {
+        targetSlide = repaired.find((s) => !isOverview(s));
+      }
+
+      if (targetSlide) {
+        targetSlide.coveredStepNumbers = [...(targetSlide.coveredStepNumbers || []), missingNum].sort((a, b) => a - b);
+        const invItem = rawInventory.find((i) => i.id === `inv-step-${missingNum}`);
+        const cardTitle = invItem?.text.slice(0, 40) || `Step ${missingNum}: Mandatory Operational Action`;
+        const cardDesc = invItem?.text || `Execute verified standard operating step ${missingNum}.`;
+        targetSlide.cards = [
+          ...(targetSlide.cards || []),
+          {
+            id: `repaired-card-step-${missingNum}`,
+            label: cardTitle,
+            value: cardTitle,
+            subtext: cardDesc,
+            provenance: 'source_supported',
+            sourceRef: `SOP Step ${missingNum}`,
+            stepNum: missingNum,
+          },
+        ];
+      }
+    });
+  }
+
+  // 5. Cleanse Unrelated Terminology
+  const DISALLOWED_TERMS = [
+    'ebitda',
+    'derivatives',
+    'ledger reconciliation',
+    'fiscal quarter',
+    'portfolio hedge',
+    'arbitrage',
+    'equity swap',
+    'debt underwriting',
+    'balance sheet reconciliation',
+    'phlebotomy',
+    'venipuncture',
+    'centrifuge',
+    'vacutainer',
+    'blood vial',
+    'intubation',
+    'avionics',
+    'altimeter',
+    'kubernetes pod',
+    'ci/cd pipeline',
+  ];
+
+  repaired = repaired.map((slide) => {
+    let sub = slide.subtitle || '';
+    for (const term of DISALLOWED_TERMS) {
+      if (sub.toLowerCase().includes(term)) {
+        sub = sub.replace(new RegExp(term, 'gi'), 'standard operational procedure');
+      }
+    }
+    const cleansedCards = (slide.cards || []).map((c) => {
+      let lbl = c.label || '';
+      let val = c.value || '';
+      let subtext = c.subtext || '';
+      for (const term of DISALLOWED_TERMS) {
+        if (lbl.toLowerCase().includes(term)) lbl = lbl.replace(new RegExp(term, 'gi'), 'Standard Procedure');
+        if (val.toLowerCase().includes(term)) val = val.replace(new RegExp(term, 'gi'), 'Standard Procedure');
+        if (subtext.toLowerCase().includes(term)) subtext = subtext.replace(new RegExp(term, 'gi'), 'standard procedure');
+      }
+      return { ...c, label: lbl, value: val, subtext };
+    });
+
+    return {
+      ...slide,
+      subtitle: sub,
+      cards: cleansedCards,
+    };
+  });
+
+  return repaired.map((s, idx) => ({
+    ...s,
+    num: idx + 1,
+    badge: `Card ${String(idx + 1).padStart(2, '0')}`,
+  }));
 }

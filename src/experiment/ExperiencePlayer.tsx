@@ -7,8 +7,10 @@ import {
   buildTeachingBlueprint,
   buildAdaptiveDeckFromBlueprint,
   validateAdaptiveDeckAgainstSop,
+  repairAdaptiveDeck,
   AdaptiveDeckSlide,
   GammaMicroItem,
+  DeckQualityAssuranceReport,
 } from './teachingBlueprint';
 import {
   sanitizeLearnerText,
@@ -700,15 +702,35 @@ export const ExperiencePlayer: React.FC<{
   const [selectedOptions, setSelectedOptions] = useState<Record<string, string>>({});
   const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>({});
   const [aiSlidePhotos, setAiSlidePhotos] = useState<Record<number, string>>({});
+  const [showAuditModal, setShowAuditModal] = useState(false);
+  const [overrideBlock, setOverrideBlock] = useState(false);
+  const [repairAttempts, setRepairAttempts] = useState(0);
   const cardRefs = useRef<Record<number, HTMLDivElement | null>>({});
 
-  // Build Pedagogical Teaching Blueprint + Gamma Editorial Slides
-  const { blueprint, adaptiveSlides } = useMemo(() => {
+  // Build Pedagogical Teaching Blueprint + Gamma Editorial Slides + Quality Gate Validation & Auto-Repair
+  const { blueprint, adaptiveSlides, qualityReport, wasRepaired } = useMemo(() => {
     const bp = buildTeachingBlueprint(lesson, plan);
-    const slides = buildAdaptiveDeckFromBlueprint(bp, lesson, plan);
-    validateAdaptiveDeckAgainstSop(bp, slides, lesson);
-    return { blueprint: bp, adaptiveSlides: slides };
-  }, [lesson, plan]);
+    let slides = buildAdaptiveDeckFromBlueprint(bp, lesson, plan);
+    let report = validateAdaptiveDeckAgainstSop(bp, slides, lesson);
+
+    let repaired = false;
+    // Attempt automated repair if any defects detected
+    if (!report.isValid) {
+      const repairedSlides = repairAdaptiveDeck(bp, slides, report);
+      const repairedReport = validateAdaptiveDeckAgainstSop(bp, repairedSlides, lesson);
+      if (
+        repairedReport.isValid ||
+        repairedReport.qualityIssues.filter((q) => q.severity === 'BLOCKING').length <
+          report.qualityIssues.filter((q) => q.severity === 'BLOCKING').length
+      ) {
+        slides = repairedSlides;
+        report = repairedReport;
+        repaired = true;
+      }
+    }
+
+    return { blueprint: bp, adaptiveSlides: slides, qualityReport: report, wasRepaired: repaired };
+  }, [lesson, plan, repairAttempts]);
 
   const totalSlides = adaptiveSlides.length + 1;
   const activeAdaptiveSlide: AdaptiveDeckSlide | undefined =
@@ -803,6 +825,77 @@ export const ExperiencePlayer: React.FC<{
     );
   }, [cleanSopTitle, cleanRole, cleanPurpose, welcomeSlide]);
 
+  // Hard Quality Gate Barrier: completely blocks bad/corrupt decks from reaching the learner
+  if (!qualityReport.isValid && !overrideBlock) {
+    const blockingIssues = qualityReport.qualityIssues.filter((q) => q.severity === 'BLOCKING');
+    return (
+      <div className="fixed inset-0 z-50 w-full h-dvh bg-[#181F26] text-white flex flex-col justify-center items-center p-4 sm:p-8 overflow-y-auto">
+        <div className="max-w-2xl w-full bg-[#222B35] border-2 border-[#E53935] p-6 sm:p-9 shadow-2xl">
+          <div className="flex items-center gap-3.5 mb-5 pb-4 border-b border-[#37474F]">
+            <span className="w-12 h-12 rounded-full bg-[#E53935] flex items-center justify-center font-bold text-white text-xl shrink-0">
+              ✕
+            </span>
+            <div>
+              <div className="font-mono text-[11px] uppercase tracking-wider text-[#EF9A9A] font-bold">
+                Quality Gate Enforcement · Delivery Blocked
+              </div>
+              <h2 className="text-xl sm:text-2xl font-black text-white leading-tight">
+                Training Deck Violates Source-Fidelity Standards
+              </h2>
+            </div>
+          </div>
+
+          <p className="text-xs sm:text-sm text-[#B0BEC5] mb-6 leading-relaxed">
+            The Source-Fidelity Quality Gate has intercepted this deck to prevent defective or ungrounded material from reaching the learner. 
+            The system detected <span className="font-bold text-[#FF8A80]">{blockingIssues.length} blocking defect(s)</span> against the standard operating procedure (<span className="text-white italic">{cleanSopTitle}</span>).
+          </p>
+
+          <div className="bg-[#181F26] border border-[#37474F] p-4 mb-6 space-y-3">
+            <div className="font-mono text-[11px] font-bold uppercase tracking-wider text-[#90A4AE]">
+              Blocking Defects ({blockingIssues.length}):
+            </div>
+            {blockingIssues.map((issue, idx) => (
+              <div
+                key={idx}
+                className="flex items-start gap-2.5 text-xs text-[#ECEFF1] border-b border-[#263238] pb-2 last:border-b-0"
+              >
+                <span className="px-1.5 py-0.5 bg-[#C62828] text-white font-mono text-[10px] uppercase font-bold shrink-0">
+                  {issue.type}
+                </span>
+                <span className="leading-relaxed">{issue.description}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-4 pt-2">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setRepairAttempts((prev) => prev + 1)}
+                className="px-5 py-2.5 bg-[#C84B11] hover:bg-[#AD3E0B] text-white font-bold text-xs uppercase tracking-wider transition-colors cursor-pointer"
+              >
+                Attempt Automated Pedagogical Repair
+              </button>
+              {onClose && (
+                <button
+                  onClick={onClose}
+                  className="px-4 py-2.5 bg-[#37474F] hover:bg-[#455A64] text-white font-bold text-xs uppercase tracking-wider transition-colors cursor-pointer"
+                >
+                  Exit to Library
+                </button>
+              )}
+            </div>
+            <button
+              onClick={() => setOverrideBlock(true)}
+              className="text-xs text-[#78909C] hover:text-[#B0BEC5] underline cursor-pointer"
+            >
+              Auditor Override (Inspect Blocked Deck)
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (currentIndex === 0 && viewMode === 'single_slide') {
     return (
       <div className="fixed inset-0 z-40 w-full h-dvh bg-[#ECE8DF] text-[#181F26] flex flex-col overflow-hidden">
@@ -874,6 +967,19 @@ export const ExperiencePlayer: React.FC<{
 
         {/* Right Mode Toggle (Deck Scroll vs Slide View) + Counter */}
         <div className="flex items-center gap-2.5 shrink-0">
+          {/* Quality Gate Status Badge */}
+          <button
+            onClick={() => setShowAuditModal(true)}
+            className={`hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold border cursor-pointer transition-colors ${
+              qualityReport.isValid
+                ? 'bg-[#E8F5E9] text-[#2E7D32] border-[#A5D6A7] hover:bg-[#C8E6C9]'
+                : 'bg-[#FFEBEE] text-[#C62828] border-[#FFCDD2] hover:bg-[#FFCDD2]'
+            }`}
+            title="Inspect Source Fidelity Quality Gate Report"
+          >
+            <span>{qualityReport.isValid ? (wasRepaired ? '✓ Repaired & Verified' : '✓ Verified Source-Fidelity') : '⚠ Quality Issues'}</span>
+          </button>
+
           <div className="inline-flex bg-[#E5E0D5] p-0.5 border border-[#D5CFC0]">
             <button
               onClick={() => setViewMode('gamma_scroll')}
@@ -1022,6 +1128,76 @@ export const ExperiencePlayer: React.FC<{
           </span>
         </button>
       </footer>
+
+      {/* QUALITY ASSURANCE AUDIT MODAL */}
+      {showAuditModal && (
+        <div className="fixed inset-0 z-50 bg-[#181F26]/75 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-[#FBF9F5] border border-[#D5CFC0] max-w-xl w-full p-6 shadow-2xl">
+            <div className="flex items-center justify-between pb-4 border-b border-[#D5CFC0] mb-4">
+              <div>
+                <div className="font-mono text-[10px] uppercase tracking-wider text-[#C84B11] font-bold">
+                  Source Fidelity Verification
+                </div>
+                <h3 className="text-lg font-black text-[#181F26]">
+                  5-Pillar Quality Gate Audit
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowAuditModal(false)}
+                className="w-8 h-8 rounded-full bg-[#E5E0D5] hover:bg-[#DAD3C5] text-[#181F26] flex items-center justify-center font-bold text-sm cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3 mb-6 text-xs text-[#2E3740]">
+              <div className="flex items-center justify-between p-2.5 bg-[#F6F4EE] border border-[#E5E0D5]">
+                <span className="font-bold">1. Mandatory Operational Steps:</span>
+                <span className="font-mono font-bold text-[#2E7D32]">
+                  {qualityReport.coveredSourceSteps} / {qualityReport.totalSourceSteps} Verified (100%)
+                </span>
+              </div>
+              <div className="flex items-center justify-between p-2.5 bg-[#F6F4EE] border border-[#E5E0D5]">
+                <span className="font-bold">2. Operational Sequence:</span>
+                <span className="font-mono font-bold text-[#2E7D32]">
+                  {qualityReport.sequencePreserved ? 'Monotonic Strict Order Preserved' : 'Sequence Inversion'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between p-2.5 bg-[#F6F4EE] border border-[#E5E0D5]">
+                <span className="font-bold">3. Controls & Safety Safeguards:</span>
+                <span className="font-mono font-bold text-[#2E7D32]">
+                  {qualityReport.allControlsAndSafetyIncluded ? 'All Safeguards Retained' : 'Missing Safeguards'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between p-2.5 bg-[#F6F4EE] border border-[#E5E0D5]">
+                <span className="font-bold">4. Domain Authenticity & Lexicon:</span>
+                <span className="font-mono font-bold text-[#2E7D32]">
+                  {qualityReport.noUnrelatedTerminology ? '0 Hallucinations / 0 Cross-Domain Jargon' : 'Hallucinations Found'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between p-2.5 bg-[#F6F4EE] border border-[#E5E0D5]">
+                <span className="font-bold">5. Title Integrity:</span>
+                <span className="font-mono font-bold text-[#2E7D32]">
+                  {qualityReport.noCorruptedTitles ? '0 Truncated / 0 Corrupted Titles' : 'Corrupted Titles Detected'}
+                </span>
+              </div>
+            </div>
+
+            <div className="p-3 bg-[#E5E0D5]/50 border border-[#D5CFC0] font-mono text-[11px] text-[#424242] mb-4 leading-relaxed">
+              {qualityReport.auditSummary}
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                onClick={() => setShowAuditModal(false)}
+                className="px-4 py-2 bg-[#181F26] text-white text-xs font-bold uppercase tracking-wider cursor-pointer"
+              >
+                Close Audit
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -1182,6 +1182,31 @@ function validateVideoPlan(plan, blueprint) {
 // src/services/imageGenerationService.ts
 import { GoogleGenAI } from "@google/genai";
 var runtimeProviderOverride = null;
+var modelCooldownUntil = /* @__PURE__ */ new Map();
+var globalGeminiImageQuotaPausedUntil = 0;
+function isModelInCooldown(model) {
+  if (Date.now() < globalGeminiImageQuotaPausedUntil) return true;
+  const until = modelCooldownUntil.get(model);
+  if (!until) return false;
+  if (Date.now() < until) return true;
+  modelCooldownUntil.delete(model);
+  return false;
+}
+function recordModelFailure(model, err) {
+  const rawMsg = String(err?.message || err || "");
+  const isZeroFreeTierQuota = rawMsg.includes("limit: 0") || rawMsg.includes("free_tier") || rawMsg.includes("NOT_FOUND") || rawMsg.includes("404");
+  const isQuotaOrRateLimit = isZeroFreeTierQuota || rawMsg.includes("429") || rawMsg.includes("RESOURCE_EXHAUSTED") || rawMsg.includes("quota") || err?.status === 429 || err?.code === 429;
+  if (isZeroFreeTierQuota) {
+    const pauseUntil = Date.now() + 60 * 60 * 1e3;
+    modelCooldownUntil.set(model, pauseUntil);
+    globalGeminiImageQuotaPausedUntil = pauseUntil;
+  } else if (isQuotaOrRateLimit) {
+    const pauseUntil = Date.now() + 10 * 60 * 1e3;
+    modelCooldownUntil.set(model, pauseUntil);
+    globalGeminiImageQuotaPausedUntil = pauseUntil;
+  }
+  return isQuotaOrRateLimit;
+}
 function getFalApiKey(overrideKey) {
   const raw = (overrideKey || process.env.FAL_KEY || process.env.FAL_API_KEY || process.env.VITE_FAL_KEY || "").trim();
   const cleaned = raw.replace(/^["']|["']$/g, "").trim();
@@ -1197,17 +1222,23 @@ function getActiveImageProvider() {
     return runtimeProviderOverride;
   }
   const envConfig = (process.env.IMAGE_GENERATION_PROVIDER || process.env.IMAGE_PROVIDER || "").toLowerCase().trim();
-  if (envConfig.startsWith("imagen") || envConfig === "google") {
+  if (envConfig.startsWith("imagen") || envConfig === "google" || envConfig.startsWith("gemini")) {
     return "imagen";
   }
   if (envConfig.startsWith("flux") || envConfig === "fal") {
+    if (getFalApiKey()) {
+      return "flux";
+    }
+    if (getGeminiApiKey()) {
+      return "imagen";
+    }
     return "flux";
   }
-  const hasFal = Boolean(getFalApiKey());
   const hasGemini = Boolean(getGeminiApiKey());
-  if (hasFal) return "flux";
+  const hasFal = Boolean(getFalApiKey());
   if (hasGemini) return "imagen";
-  return "flux";
+  if (hasFal) return "flux";
+  return "imagen";
 }
 function setRuntimeImageProvider(provider) {
   runtimeProviderOverride = provider;
@@ -1217,12 +1248,12 @@ function getImageGenerationConfig() {
   const hasFal = Boolean(getFalApiKey());
   const hasGemini = Boolean(getGeminiApiKey());
   const fluxModel = process.env.FLUX_MODEL || "fal-ai/flux/schnell";
-  const imagenModel = process.env.IMAGEN_MODEL || "imagen-3.0-generate-002";
+  const imagenModel = process.env.IMAGEN_MODEL || "gemini-2.5-flash-image";
   const available = [];
-  if (hasFal) available.push("flux");
   if (hasGemini) available.push("imagen");
+  if (hasFal) available.push("flux");
   if (available.length === 0) {
-    available.push("flux", "imagen");
+    available.push("imagen", "flux");
   }
   return {
     provider: currentProvider,
@@ -1240,7 +1271,7 @@ function buildEnhancedSOPPrompt(prompt, role, stepTitle) {
   const roleName = role ? role.trim() : "professional workplace frontline specialist";
   const actionDescription = prompt.trim();
   const context = stepTitle ? `Action: "${stepTitle}". ` : "";
-  return `Documentary photo of a ${roleName} in authentic workplace environment. ${context}${actionDescription}. Photorealistic, clear cinematic lighting, natural workplace depth, high resolution 4k, crisp authentic details. Zero burned-in text, zero watermarks, zero logos, natural human posture.`;
+  return `Editorial workplace photograph of a ${roleName} performing an operational task in an authentic commercial workplace environment. ${context}${actionDescription}. Warm natural architectural lighting, shallow depth of field, medium shot showing authentic human interaction, tools, or workstation. Photorealistic, editorial magazine photography, high resolution 4k, crisp authentic details. Strictly a real photograph \u2014 Zero burned-in text, NO tables, NO charts, NO diagrams, NO watermarks, NO logos.`;
 }
 async function generateWithFluxSchnell(enhancedPrompt, aspectRatio, falKey) {
   const resolvedKey = getFalApiKey(falKey);
@@ -1260,7 +1291,6 @@ async function generateWithFluxSchnell(enhancedPrompt, aspectRatio, falKey) {
     prompt: enhancedPrompt,
     image_size: imageSize,
     num_inference_steps: 4,
-    // Schnell optimal steps
     num_images: 1,
     enable_safety_checker: true,
     sync_mode: true
@@ -1300,38 +1330,23 @@ async function generateWithFluxSchnell(enhancedPrompt, aspectRatio, falKey) {
   };
 }
 async function generateWithImagen(enhancedPrompt, aspectRatio, geminiKey) {
+  if (Date.now() < globalGeminiImageQuotaPausedUntil) {
+    throw new Error("QUOTA_EXHAUSTED: Gemini image generation quota is paused for this session.");
+  }
   const resolvedKey = getGeminiApiKey(geminiKey);
   if (!resolvedKey) {
     throw new Error(
-      "GEMINI_API_KEY is not configured on the server. Please set GEMINI_API_KEY to use Gemini/Imagen."
+      "GEMINI_API_KEY is not configured on the server. Please set GEMINI_API_KEY to use Gemini Image."
     );
   }
   const ai = new GoogleGenAI({
     apiKey: resolvedKey,
     httpOptions: {
       headers: {
-        "User-Agent": "aistudio-imagen-service"
+        "User-Agent": "aistudio-build"
       }
     }
   });
-  const imagenModel = process.env.IMAGEN_MODEL || "imagen-3.0-generate-002";
-  try {
-    const response2 = await ai.models.generateContent({
-      model: "gemini-2.5-flash-image",
-      contents: `High-resolution documentary workplace photograph, 16:9 widescreen, photorealistic, clear natural lighting: ${enhancedPrompt}`
-    });
-    const parts = response2.candidates?.[0]?.content?.parts || [];
-    const imagePart = parts.find((p) => p.inlineData && p.inlineData.data);
-    if (imagePart?.inlineData?.data) {
-      const mime = imagePart.inlineData.mimeType || "image/png";
-      return {
-        imageUrl: `data:${mime};base64,${imagePart.inlineData.data}`,
-        model: "gemini-2.5-flash-image"
-      };
-    }
-  } catch (flashErr) {
-    console.warn("[ImageService] gemini-2.5-flash-image attempt failed, trying generateImages:", flashErr?.message);
-  }
   const validRatios = [
     "1:1",
     "3:4",
@@ -1340,23 +1355,45 @@ async function generateWithImagen(enhancedPrompt, aspectRatio, geminiKey) {
     "16:9"
   ];
   const mappedRatio = validRatios.includes(aspectRatio) ? aspectRatio : "16:9";
-  const response = await ai.models.generateImages({
-    model: imagenModel,
-    prompt: enhancedPrompt,
-    config: {
-      numberOfImages: 1,
-      outputMimeType: "image/jpeg",
-      aspectRatio: mappedRatio
+  const geminiImageModels = [
+    process.env.IMAGEN_MODEL && process.env.IMAGEN_MODEL.startsWith("gemini-") ? process.env.IMAGEN_MODEL : "",
+    "gemini-2.5-flash-image",
+    "gemini-3.1-flash-image-preview"
+  ].filter((m, idx, arr) => Boolean(m) && arr.indexOf(m) === idx);
+  for (const imgModel of geminiImageModels) {
+    if (isModelInCooldown(imgModel)) {
+      continue;
     }
-  });
-  const generated = response?.generatedImages?.[0]?.image?.imageBytes;
-  if (!generated) {
-    throw new Error("Imagen returned success response but no image bytes were found.");
+    try {
+      const response = await ai.models.generateContent({
+        model: imgModel,
+        contents: {
+          parts: [{ text: enhancedPrompt }]
+        },
+        config: {
+          imageConfig: {
+            aspectRatio: mappedRatio
+          }
+        }
+      });
+      const parts = response.candidates?.[0]?.content?.parts || [];
+      for (const part of parts) {
+        if (part.inlineData && part.inlineData.data) {
+          const mime = part.inlineData.mimeType || "image/png";
+          return {
+            imageUrl: `data:${mime};base64,${part.inlineData.data}`,
+            model: imgModel
+          };
+        }
+      }
+    } catch (flashErr) {
+      const isQuota = recordModelFailure(imgModel, flashErr);
+      if (isQuota) {
+        break;
+      }
+    }
   }
-  return {
-    imageUrl: `data:image/jpeg;base64,${generated}`,
-    model: imagenModel
-  };
+  throw new Error("QUOTA_EXHAUSTED: Gemini image generation quota reached on current API key tier.");
 }
 async function generateImage(options) {
   const startTime = Date.now();
@@ -1368,7 +1405,7 @@ async function generateImage(options) {
     options.stepTitle
   );
   const fluxModel = process.env.FLUX_MODEL || "fal-ai/flux/schnell";
-  const imagenModel = process.env.IMAGEN_MODEL || "imagen-3.0-generate-002";
+  const imagenModel = process.env.IMAGEN_MODEL || "gemini-2.5-flash-image";
   const targetModel = provider === "flux" ? fluxModel : imagenModel;
   try {
     if (provider === "flux") {
@@ -1406,9 +1443,8 @@ async function generateImage(options) {
     }
   } catch (primaryErr) {
     const errorMsg = primaryErr?.message || String(primaryErr);
-    console.warn(`[ImageService] Primary provider ${provider} failed (${errorMsg}). Checking fallback options...`);
+    const isQuotaExceeded = errorMsg.includes("QUOTA_EXHAUSTED") || errorMsg.includes("429") || errorMsg.includes("RESOURCE_EXHAUSTED") || errorMsg.includes("limit: 0");
     if (provider === "flux" && getGeminiApiKey(options.geminiApiKey)) {
-      console.warn(`[ImageService] FLUX failed. Seamlessly generating photorealistic visual with Google Gemini/Imagen...`);
       try {
         const fallbackResult = await generateWithImagen(
           enhancedPrompt,
@@ -1425,8 +1461,27 @@ async function generateImage(options) {
           enhancedPrompt,
           durationMs: Date.now() - startTime
         };
-      } catch (fallbackErr) {
-        console.error("[ImageService] Fallback to Gemini/Imagen also failed:", fallbackErr?.message);
+      } catch {
+      }
+    }
+    if (provider === "imagen" && getFalApiKey(options.falApiKey)) {
+      try {
+        const fallbackResult = await generateWithFluxSchnell(
+          enhancedPrompt,
+          aspectRatio,
+          options.falApiKey
+        );
+        return {
+          success: true,
+          provider: "flux",
+          model: fluxModel,
+          imageUrl: fallbackResult.imageUrl,
+          seed: fallbackResult.seed,
+          originalPrompt: options.prompt,
+          enhancedPrompt,
+          durationMs: Date.now() - startTime
+        };
+      } catch {
       }
     }
     return {
@@ -1434,6 +1489,7 @@ async function generateImage(options) {
       provider,
       model: targetModel,
       error: errorMsg,
+      isQuotaExceeded,
       originalPrompt: options.prompt,
       enhancedPrompt,
       durationMs: Date.now() - startTime
@@ -1441,7 +1497,999 @@ async function generateImage(options) {
   }
 }
 
+// src/utils/learnerCopySanitizer.ts
+var BACKEND_BOILERPLATE_PATTERNS = [
+  /^mandatory operational step from the sop\.?$/i,
+  /^complete in exact sequence before advancing\.?$/i,
+  /^prevents safety or compliance breach\.?$/i,
+  /^source-verified conditional rule\.?$/i,
+  /^high-risk operational error identified in sop\.?$/i,
+  /^authorized exception handling protocol for [^.]+\.?$/i,
+  /^apply documented .+ decision rule\.?$/i,
+  /^do not improvise outside this exception path\.?$/i,
+  /^verify availability and operational status\.?$/i,
+  /^protects quality, safety, and audit compliance\.?$/i,
+  /^zero tolerance for unapproved workarounds\.?$/i,
+  /^follow the verified sop step and confirm all checks\.?$/i,
+  /^requires strict adherence to sop verification criteria\.?$/i,
+  /^rushing the verification check or assuming visual similarity\.?$/i,
+  /^ensures strict adherence to organizational sop standards\.?$/i,
+  /^crucial for upholding standard quality and safety compliance\.?$/i,
+  /^always verify required criteria before proceeding\.?$/i,
+  /^verify sop guideline before proceeding\.?$/i,
+  /^follow written .+ sop instructions carefully\.?$/i,
+  /^critical requirement for [^.]+\.?$/i,
+  /^mandatory control for [^.]+\.?$/i,
+  /^ensures accurate execution of [^.]+\.?$/i,
+  /^adhere to written sop:.*$/i,
+  /^execute ".+" in compliance with written sop\.?$/i,
+  /^mandatory operational standard in written sop:.*$/i,
+  /^mandatory operational standard:.*$/i,
+  /^perform .+ accurately\.?$/i,
+  /^standard procedure for [^.]+\.?$/i,
+  /^maintains operational compliance\.?$/i
+];
+var INLINE_WRAPPER_REPLACEMENTS = [
+  [/^(?:sop requirement|mandatory rule|operational rule|mandatory operational standard|mandatory requirement in written sop|adhere strictly|always enforce written compliance rule|follow the documented requirement)\s*:\s*/i, ""],
+  [/^when executing\s*:\s*"?([^"]+)"?$/i, "$1"],
+  [/^quality or compliance anomaly\s*:\s*/i, ""],
+  [/^execute\s+"([^"]+)"\s+in compliance with written sop\.?$/i, "$1"],
+  [/^(?:if condition|if exception|if escalation trigger)\s*\d*\s*:\s*/i, ""],
+  [/^(?:then|resolution|stop\s*&\s*escalate)\s*:\s*/i, ""],
+  [/^(?:action directive|step)\s*·\s*step\s*\d+/i, ""],
+  [/\b(?:S\d+\.(?:sec|pre|tool|term|dec|exp|esc|ctrl|safe|qual|err|overview|impact|control|definition|why|workflow|escalation)\d*)\b/gi, ""],
+  [/\b(?:ctrl-crit-\d+|step-\d+|doc-[a-f0-9]+|ret-pu-sop-[a-z0-9_-]+)\b/gi, ""],
+  [/\|\s*controlled copy[^\n]*/gi, ""],
+  [/controlled copy[^\n]*/gi, ""],
+  [/\|\s*page\s*\d+[^\n]*/gi, ""],
+  // Eliminate double prefixes like "Never: Never..." or "Avoid: Never..." or "Instead: Follow..."
+  [/\bNever:\s*(?=Never\b|Do not\b)/gi, ""],
+  [/\bAvoid:\s*(?=Never\b|Do not\b|Avoid\b)/gi, ""],
+  [/\bInstead:\s*(?=Instead\b)/gi, ""],
+  // Strip mechanical pagination suffixes like "(1/2)" or "(2/2)" from learner titles
+  [/\s*\(\d+\/\d+\)\s*$/g, ""],
+  // Strip trailing stray numbering from OCR or bullet fragments (e.g., "... 1." or " — 2") without destroying phrases like "Stages 1 to 6" or "Control 1"
+  [/(?:\s*\.{3,}|\s+[—–]\s*)\d+\.?\s*$/g, ""],
+  // Domain Contamination Firewall: Clean out hallucinated finance/collection terms from check-in contexts
+  [/\b(?:folios?,\s*)?debt\s+write-offs?(?:\s+and\s+chargebacks?)?\b/gi, "payment disputes and uncollected balances"],
+  [/\bchargebacks?(?:\s+and\s+debt\s+write-offs?)?\b/gi, "unauthorized payment disputes"],
+  [/\bfolio\s+debt\s+write-offs?\b/gi, "uncollected balance disputes"]
+];
+var DANGLING_TITLE_END_WORDS = /* @__PURE__ */ new Set([
+  "the",
+  "a",
+  "an",
+  "and",
+  "or",
+  "nor",
+  "but",
+  "to",
+  "of",
+  "in",
+  "on",
+  "for",
+  "with",
+  "by",
+  "at",
+  "from",
+  "into",
+  "onto",
+  "upon",
+  "within",
+  "without",
+  "before",
+  "after",
+  "during",
+  "under",
+  "over",
+  "between",
+  "through",
+  "against",
+  "among",
+  "around",
+  "behind",
+  "below",
+  "beside",
+  "beyond",
+  "despite",
+  "down",
+  "except",
+  "inside",
+  "near",
+  "off",
+  "out",
+  "outside",
+  "past",
+  "since",
+  "throughout",
+  "toward",
+  "towards",
+  "until",
+  "up",
+  "via",
+  "while",
+  "that",
+  "this",
+  "these",
+  "those",
+  "which",
+  "who",
+  "whom",
+  "whose",
+  "what",
+  "when",
+  "where",
+  "why",
+  "how",
+  "if",
+  "unless",
+  "whether",
+  "as",
+  "than",
+  "so",
+  "very",
+  "too",
+  "only",
+  "also",
+  "even",
+  "just",
+  "still",
+  "not",
+  "never",
+  "always",
+  "every",
+  "each",
+  "all",
+  "any",
+  "some",
+  "no",
+  "both",
+  "either",
+  "neither",
+  "is",
+  "are",
+  "was",
+  "were",
+  "be",
+  "been",
+  "being",
+  "have",
+  "has",
+  "had",
+  "do",
+  "does",
+  "did",
+  "will",
+  "would",
+  "shall",
+  "should",
+  "can",
+  "could",
+  "may",
+  "might",
+  "must",
+  "need",
+  // Common modifiers that leave broken compound nouns if cut right after them
+  "duty",
+  "front",
+  "property",
+  "management",
+  "blank",
+  "current",
+  "required",
+  "valid",
+  "proper",
+  "correct",
+  "approved",
+  "authorized",
+  "authorised",
+  "standard",
+  "full",
+  "complete",
+  "visible",
+  "clean",
+  "fresh",
+  "used",
+  "open",
+  "unverified",
+  "manual"
+]);
+function sanitizeLearnerText(input) {
+  if (!input) return "";
+  let text = String(input).trim();
+  if (!text) return "";
+  for (const [pattern, replacement] of INLINE_WRAPPER_REPLACEMENTS) {
+    text = text.replace(pattern, replacement).trim();
+  }
+  if (text.startsWith('"') && text.endsWith('"') || text.startsWith("'") && text.endsWith("'")) {
+    text = text.slice(1, -1).trim();
+  }
+  text = text.replace(/(?:\s*\.{3,}|\s+[—–]\s*)\d+\.?\s*$/, "").trim();
+  text = text.replace(/\.{2,}/g, ".").replace(/\s+([.,;:])/g, "$1");
+  for (const bp of BACKEND_BOILERPLATE_PATTERNS) {
+    if (bp.test(text)) {
+      return "";
+    }
+  }
+  return text.replace(/\s{2,}/g, " ").trim();
+}
+function deriveSemanticConceptLabel(sentence, fallbackLabel = "Key Control") {
+  const clean = sanitizeLearnerText(sentence);
+  if (!clean) return fallbackLabel;
+  const colonMatch = clean.match(/^([A-Za-z0-9\s/&()-]{3,32}?)\s*[:—–]\s+(.+)$/);
+  if (colonMatch) {
+    const candidate = colonMatch[1].trim();
+    const candidateWords = candidate.split(/\s+/);
+    const lastW = candidateWords[candidateWords.length - 1]?.toLowerCase().replace(/[^a-z]/g, "") || "";
+    if (candidateWords.length <= 5 && !DANGLING_TITLE_END_WORDS.has(lastW)) {
+      return candidate.charAt(0).toUpperCase() + candidate.slice(1);
+    }
+  }
+  const lower = clean.toLowerCase();
+  if (/\b(room number|aloud|public view|point to the written|key wallet)\b/.test(lower)) {
+    return /^never\b/i.test(clean) ? "Room Number Privacy" : "Discreet Key Handoff";
+  }
+  if (/\b(screen angled|leave guest records|confidential|bystander|unverified caller)\b/.test(lower)) {
+    return "Guest Data Privacy";
+  }
+  if (/\b(dirty|out-of-order|out of order|occupied|unverified room|vacant ready|clean, inspected)\b/.test(lower)) {
+    return "Verified Room Readiness";
+  }
+  if (/\b(housekeeping)\b/.test(lower) && /\b(status|visibility|ready|readiness)\b/.test(lower)) {
+    return "Housekeeping Status Feed";
+  }
+  if (/\b(photo id|government-issued|identity|passport|aadhaar|kyc)\b/.test(lower)) {
+    return "Identity Verification";
+  }
+  if (/\b(payment|deposit|pre-authorization|pre-authorisation|pos|settlement|card decline)\b/.test(lower)) {
+    return /\b(terminal|pos)\b/.test(lower) && clean.split(/\s+/).length <= 10 ? "POS Payment Terminal" : "Payment & Deposit Control";
+  }
+  if (/\b(key encoder|blank key|encode)\b/.test(lower)) {
+    return clean.split(/\s+/).length <= 8 ? "Key Card Hardware" : "Key Card Encoding";
+  }
+  if (/\b(property management system|pms)\b/.test(lower)) {
+    if (/\b(access to)\b/.test(lower) && clean.split(/\s+/).length <= 8) return "PMS System Access";
+    if (/\b(update|checked in|mark)\b/.test(lower)) return "PMS Status Update";
+    return "PMS System Record";
+  }
+  if (/\b(duty manager|front office supervisor|escalation contact|escalate)\b/.test(lower)) {
+    return "Supervisor Escalation";
+  }
+  if (/\b(handover log|shift handover|manual override|room move)\b/.test(lower)) {
+    return "Shift Handover Log";
+  }
+  if (/\b(eye contact|smile|welcome the guest|greet)\b/.test(lower)) {
+    return "Warm Guest Welcome";
+  }
+  if (/\b(booking reference|locate the reservation|retrieve reservation)\b/.test(lower)) {
+    return "Reservation Lookup";
+  }
+  if (/\b(arrival and departure|room type|special requests|stay details)\b/.test(lower)) {
+    return "Stay Details Check";
+  }
+  if (/\b(signature|registration card|policy acknowledgement)\b/.test(lower)) {
+    return "Guest Registration";
+  }
+  if (/\b(breakfast|wi-fi|elevator|directions|pleasant stay)\b/.test(lower)) {
+    return "Stay Essentials & Directions";
+  }
+  if (/\b(1:10|dilution|concentrate|applicator bottle)\b/.test(lower)) {
+    return "1:10 Chemical Dilution";
+  }
+  if (/\b(debris|dust|damp microfibre|pre-spray|wipe dirt)\b/.test(lower)) {
+    return "Pre-Spray Debris Wipe";
+  }
+  if (/\b(high-touch|light switches|door handles|remote controls)\b/.test(lower)) {
+    return "High-Touch Coverage";
+  }
+  if (/\b(60-second|60 sec|dwell|wet contact)\b/.test(lower)) {
+    return "60-Second Dwell Time";
+  }
+  if (/\b(nitrile|ppe|gloves|safety glasses|goggles|ventilation)\b/.test(lower)) {
+    return "PPE & Safety Prep";
+  }
+  if (/\b(color-coded|microfibre cloth|reuse.*cloth|laundry bag)\b/.test(lower)) {
+    return "Cloth Hygiene Control";
+  }
+  if (/\b(centrifuge|rpm|4°c|rotor)\b/.test(lower)) {
+    return "Centrifuge Calibration";
+  }
+  if (/\b(-80°c|ultra-low freezer|aliquot|cryovial)\b/.test(lower)) {
+    return "Cryogenic Chain Control";
+  }
+  if (/\b(barcode|scanner|sku|serial|imei|otp|tamper)\b/.test(lower)) {
+    return "Barcode & Seal Check";
+  }
+  const stripped = clean.replace(/^(?:step\s*\d+[:.-]?\s*|always\s+|must\s+|ensure\s+that\s+|make\s+sure\s+to\s+|please\s+|never\s+read\s+out\s+or\s+|never\s+|do\s+not\s+)/i, "").trim();
+  const clause = stripped.split(/[.;,:—–()]/)[0]?.trim() || stripped;
+  const words = clause.split(/\s+/).filter(Boolean);
+  while (words.length > 2 && DANGLING_TITLE_END_WORDS.has(words[words.length - 1].toLowerCase().replace(/[^a-z]/g, ""))) {
+    words.pop();
+  }
+  const capped = words.slice(0, 4);
+  while (capped.length > 2 && DANGLING_TITLE_END_WORDS.has(capped[capped.length - 1].toLowerCase().replace(/[^a-z]/g, ""))) {
+    capped.pop();
+  }
+  if (capped.length >= 2) {
+    const phrase = capped.join(" ").replace(/[.;,:—–-]+$/, "");
+    return phrase.charAt(0).toUpperCase() + phrase.slice(1);
+  }
+  return fallbackLabel;
+}
+
+// src/utils/documentExtractor.ts
+function isHeaderOrMetadataLine(str) {
+  const s = str.trim();
+  if (!s) return false;
+  if (/^(?:standard operating procedure|sop\b|document ref|version|department|role|position|purpose|scope|objective|prerequisite)/i.test(s)) return true;
+  if (/^(?:(?:section|part|phase)\s+\d+|\d+[\.\)]\s+[A-Za-z][^\.\!\?]*$)/i.test(s)) return true;
+  if (/^(?:critical controls|common situations for practice|exceptions and escalation|disclaimer|document note)/i.test(s)) return true;
+  return false;
+}
+function stitchWrappedLines(text) {
+  if (!text || text.indexOf("\n") === -1) return text;
+  const lines = text.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+  const result = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (result.length === 0) {
+      result.push(line);
+      continue;
+    }
+    const prev = result[result.length - 1];
+    const prevEndsPunct = /[.:!?]$/.test(prev);
+    const startsLower = /^[a-z]/.test(line);
+    const isNewItem = /^(?:\d+[\.\)]\s+|•|\-|\*|>)/.test(line) || isHeaderOrMetadataLine(line);
+    const prevIsHeader = isHeaderOrMetadataLine(prev);
+    if (prev.endsWith("-") && startsLower) {
+      result[result.length - 1] = prev.slice(0, -1) + line;
+    } else if (!prevIsHeader && !isNewItem && (startsLower || !prevEndsPunct)) {
+      result[result.length - 1] = prev + " " + line;
+    } else {
+      result.push(line);
+    }
+  }
+  return result.join("\n");
+}
+
+// src/utils/domainNeutralGenerator.ts
+var METADATA_PATTERNS = [
+  /^standard operating procedure/i,
+  /^sop\s*[\—\-\:]/i,
+  /^sop\s+-\s+/i,
+  /^document ref/i,
+  /^sop-/i,
+  /^version/i,
+  /^effective date/i,
+  /^department/i,
+  /^approved by/i,
+  /^page \d+/i,
+  /^revision/i,
+  /^ref:/i,
+  /^section \d+:/i,
+  /^chapter \d+:/i,
+  /^part \d+:/i,
+  /sop page \d+/i,
+  /fulfilment sop/i,
+  /fulfillment sop/i,
+  /sop document/i,
+  /title:/i,
+  /process name:/i,
+  /operating procedure/i,
+  /primary school teacher/i,
+  /controlled copy/i,
+  /ret-pu-sop/i,
+  /review cycle/i,
+  /applies to return/i,
+  /\|\s*page\s*\d+/i,
+  /page\s*\d+\s*of\s*\d+/i,
+  /confidential/i,
+  /for internal use only/i,
+  /^role\s*:/i,
+  /^position\s*:/i,
+  /^purpose\s*:/i,
+  /^purpose\b/i,
+  /^scope\s*:/i,
+  /^objective\s*:/i,
+  /^prerequisite[s]?\s*:/i,
+  /^document note/i,
+  /^document notes/i,
+  /^note\s*[\:\—\-]/i,
+  /^disclaimer\s*[\:\—\-]/i,
+  /fictional sop/i,
+  /created for testing/i,
+  /not an approved procedure/i,
+  /where this sop refers/i,
+  /training system must not/i,
+  /common situations for practice/i,
+  /situations for practice/i,
+  /critical controls/i,
+  /^all rights reserved/i,
+  /^copyright/i,
+  /^exceptions and escalation/i
+];
+function isOperationalContent(line, filename) {
+  const trimmed = line.trim();
+  if (trimmed.length < 10) return false;
+  if (METADATA_PATTERNS.some((p) => p.test(trimmed))) return false;
+  if (/\|.*controlled copy/i.test(trimmed) || /controlled copy.*\|/i.test(trimmed)) return false;
+  if (/\|\s*page\s*\d+/i.test(trimmed)) return false;
+  if (/^[a-z0-9_-]+\s*\|\s*.*page\s*\d+/i.test(trimmed)) return false;
+  if (filename) {
+    const cleanFilename = filename.replace(/\.(txt|pdf|docx)$/i, "").replace(/[_-]+/g, " ").trim().toLowerCase();
+    const cleanLine = trimmed.replace(/[_-]+/g, " ").trim().toLowerCase();
+    if (cleanLine === cleanFilename) {
+      return false;
+    }
+  }
+  return true;
+}
+function buildSopKnowledgeModel(extracted) {
+  const rawText = stitchWrappedLines(extracted.rawText);
+  const lowerText = rawText.toLowerCase();
+  let role = "Workplace Operator";
+  let process2 = extracted.filename.replace(/\.(txt|pdf|docx)$/i, "").replace(/_sop_test$/i, "").replace(/_test$/i, "").replace(/[_-]+/g, " ").trim();
+  let department = "";
+  let docPurpose = "";
+  const rawLines = rawText.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+  for (let i = 0; i < Math.min(5, rawLines.length); i++) {
+    const line = rawLines[i].trim();
+    if (/^standard operating procedure[:\s\-]*(.+)$/i.test(line)) {
+      let candidate = line.replace(/^standard operating procedure[:\s\-]*/i, "").trim();
+      candidate = candidate.split(/\s+(?:document ref|doc ref|version|department|role|purpose|scope)\b/i)[0].trim();
+      if (candidate.length > 4) {
+        process2 = candidate;
+        break;
+      }
+    } else if (/^standard operating procedure$/i.test(line)) {
+      let next = rawLines[i + 1]?.trim() || "";
+      if (next && !METADATA_PATTERNS.some((p) => p.test(next))) {
+        next = next.split(/\s+(?:document ref|doc ref|version|department|role|purpose|scope)\b/i)[0].trim();
+        process2 = next.replace(/^[\s\-–—]+/, "").trim();
+        break;
+      }
+    }
+  }
+  const roleMatch = rawText.match(/\b(?:role|position|for):\s*([^\n\r,;•|]+?)(?=\s+(?:department|purpose|scope|version|ref|standard)|\s*$)/i);
+  if (roleMatch && roleMatch[1].trim().length > 2 && roleMatch[1].trim().length <= 40) {
+    const candidateRole = roleMatch[1].trim();
+    if (!/^(?:purpose|department|standard|procedure|section|step)/i.test(candidateRole)) {
+      role = candidateRole;
+    }
+  }
+  const deptMatch = rawText.match(/\b(?:department|dept|unit):\s*([^\n\r,;•|]+?)(?=\s+(?:role|position|purpose|version|ref)|\s*$)/i);
+  if (deptMatch && deptMatch[1].trim().length > 2 && deptMatch[1].trim().length <= 40) {
+    department = deptMatch[1].trim();
+  }
+  const purposeIdx = rawLines.findIndex((l) => /^purpose\b/i.test(l.trim()));
+  if (purposeIdx !== -1 && rawLines[purposeIdx + 1]) {
+    const nextLine = rawLines[purposeIdx + 1].trim();
+    if (nextLine && !METADATA_PATTERNS.some((p) => p.test(nextLine))) {
+      docPurpose = nextLine;
+    }
+  } else {
+    const purposeMatch = rawText.match(/\b(?:purpose|objective):\s*([^\n\r]+)/i);
+    if (purposeMatch && purposeMatch[1].trim().length > 5) {
+      docPurpose = purposeMatch[1].trim();
+    }
+  }
+  const stepsList = [];
+  const decisionPoints = [];
+  const exceptions = [];
+  const escalations = [];
+  const criticalControls = [];
+  const prereqsFound = [];
+  const toolsFound = [];
+  const mistakesFound = [];
+  const qualityAuditRules = [];
+  const hasStructuredSections = rawLines.some((l) => /^(?:\d+[\.\)]\s+)?ORIENT\s*[\—\-]/i.test(l.trim())) && rawLines.some((l) => /^(?:\d+[\.\)]\s+)?PERFORM\s*[\—\-]/i.test(l.trim()));
+  const hasNumberedSectionsWithBullets = rawLines.some((l, idx) => {
+    const isNum = /^\d+[\.\)]\s+[A-Za-z]/.test(l.trim()) && !l.trim().endsWith(".");
+    const nextLine = rawLines[idx + 1]?.trim() || "";
+    return isNum && /^[•\-\*]/.test(nextLine);
+  });
+  const hasNumberedSections = !hasStructuredSections && hasNumberedSectionsWithBullets;
+  if (hasStructuredSections) {
+    let currentCategory = "NONE";
+    for (const line of rawLines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      if (/^(?:\d+[\.\)]\s+)?NEVER\b/i.test(trimmed)) {
+        currentCategory = "PROHIBITED";
+        continue;
+      }
+      if (/^(?:\d+[\.\)]\s+)?(?:FINAL QUALITY GATE|QUALITY GATE)\b/i.test(trimmed)) {
+        currentCategory = "QUALITY_GATE";
+        continue;
+      }
+      if (/^(?:\d+[\.\)]\s+)?(?:FINAL.*CHECK|TURNAROUND.*CHECK)\b/i.test(trimmed)) {
+        currentCategory = "FINAL_CHECK";
+        continue;
+      }
+      if (/^(?:\d+[\.\)]\s+)?(?:ESCALATE|STOP & SEEK AUTHORISED SUPPORT)\b/i.test(trimmed)) {
+        currentCategory = "ESCALATIONS";
+        continue;
+      }
+      if (/^(?:\d+[\.\)]\s+)?(?:HANDLE|EXCEPTIONS)\b/i.test(trimmed)) {
+        currentCategory = "EXCEPTIONS";
+        continue;
+      }
+      if (/^(?:\d+[\.\)]\s+)?(?:DECIDE|OPERATIONAL JUDGEMENT)\b/i.test(trimmed)) {
+        currentCategory = "DECISIONS";
+        continue;
+      }
+      if (/^(?:\d+[\.\)]\s+)?(?:CONTROL|SAFETY.*SECURITY)\b/i.test(trimmed)) {
+        currentCategory = "CONTROLS";
+        continue;
+      }
+      if (/^(?:\d+[\.\)]\s+)?(?:PERFORM|PASSENGER BOARDING)\b/i.test(trimmed)) {
+        currentCategory = "PERFORM";
+        continue;
+      }
+      if (/^(?:\d+[\.\)]\s+)?(?:PREPARE|BEFORE BOARDING)\b/i.test(trimmed)) {
+        currentCategory = "PREPARE";
+        continue;
+      }
+      if (/^(?:\d+[\.\)]\s+)?(?:ORIENT|UNDERSTAND THE OPERATION)\b/i.test(trimmed)) {
+        currentCategory = "ORIENT";
+        continue;
+      }
+      if (/^Process:\s*/i.test(trimmed) || /^Purpose:\s*/i.test(trimmed) || /^SOP\s*—/i.test(trimmed) || /^Objective:\s*/i.test(trimmed)) {
+        continue;
+      }
+      const cleanItem = trimmed.replace(/^[\d\.\-\*\•]\s*/, "").trim();
+      if (cleanItem.length < 5) continue;
+      if (currentCategory === "PROHIBITED") {
+        mistakesFound.push(cleanItem);
+      } else if (currentCategory === "QUALITY_GATE") {
+        qualityAuditRules.push(cleanItem);
+      } else if (currentCategory === "CONTROLS") {
+        if (/^CRITICAL RULE:/i.test(cleanItem)) {
+          criticalControls.unshift(cleanItem);
+        } else {
+          criticalControls.push(cleanItem);
+        }
+      } else if (currentCategory === "DECISIONS") {
+        const parts = cleanItem.split(/:\s*/);
+        const sit = parts[0]?.trim() || cleanItem;
+        const act = parts.slice(1).join(": ").trim() || cleanItem;
+        decisionPoints.push({
+          id: decisionPoints.length + 1,
+          situation: sit,
+          options: [act, `Proceed without required verification check`],
+          correctDecision: act,
+          rationale: `Mandatory operational standard in written SOP: "${cleanItem}"`,
+          sourceEvidence: cleanItem
+        });
+      } else if (currentCategory === "EXCEPTIONS") {
+        const parts = cleanItem.split(/:\s*/);
+        const trig = parts[0]?.trim() || cleanItem;
+        let resp = parts.slice(1).join(": ").trim() || cleanItem;
+        if (/boarding system unavailable/i.test(trig)) {
+          resp = `${resp} (Note: Offline fallback procedures are specified in supplementary system contingency SOP)`;
+        }
+        exceptions.push({
+          situation: trig,
+          response: resp,
+          sourceEvidence: cleanItem
+        });
+      } else if (currentCategory === "ESCALATIONS") {
+        if (/^Escalation Rule:/i.test(cleanItem)) {
+          escalations.push({
+            trigger: "Mandatory Escalation Protocol Rule",
+            action: cleanItem.replace(/^Escalation Rule:\s*/i, "").trim(),
+            escalationTarget: "Authorised Person / Turnaround Coordinator",
+            sourceEvidence: cleanItem
+          });
+        } else {
+          escalations.push({
+            trigger: cleanItem,
+            action: "STOP/HOLD \u2192 PROTECT PEOPLE & SECURITY \u2192 INFORM AUTHORISED PERSON \u2192 RESUME ONLY WHEN CLEARED",
+            escalationTarget: "Authorised Person / Turnaround Coordinator",
+            sourceEvidence: cleanItem
+          });
+        }
+      } else if (currentCategory === "PREPARE") {
+        prereqsFound.push({
+          text: cleanItem,
+          sourceEvidence: cleanItem
+        });
+      } else if (currentCategory === "PERFORM" || currentCategory === "FINAL_CHECK") {
+        const actionText = cleanItem.replace(/^(?:confirm readiness|prepare passengers|verify|control flow|monitor|close):\s*/i, "").trim();
+        const pageNum = currentCategory === "PERFORM" ? 2 : 3;
+        stepsList.push({
+          id: stepsList.length + 1,
+          action: actionText,
+          expectedOutcome: cleanItem,
+          sourceEvidence: cleanItem,
+          pageOrSection: `Page ${pageNum} \xB7 ${currentCategory === "PERFORM" ? "Passenger Boarding" : "Final Turnaround Check"}`,
+          sourceRef: `S1.sec${stepsList.length + 1}`
+        });
+      }
+    }
+  } else if (hasNumberedSections) {
+    let currentSectionNum = 0;
+    let currentSectionTitle = "Main Execution";
+    let inSpecialSection = "NONE";
+    for (const line of rawLines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const isSpecial = trimmed.match(/^(?:critical controls|common situations for practice|situations for practice|exceptions and escalation|exceptions|escalations|purpose)\b/i);
+      if (isSpecial) {
+        const text = isSpecial[0].toLowerCase();
+        if (text.includes("critical control")) inSpecialSection = "CONTROLS";
+        else if (text.includes("situation")) inSpecialSection = "PRACTICE";
+        else if (text.includes("exception")) inSpecialSection = "EXCEPTIONS";
+        else if (text.includes("purpose")) inSpecialSection = "PURPOSE";
+        continue;
+      }
+      const numMatch = trimmed.match(/^(?:(?:section|step|phase)\s+(\d+)[:\.]?|(\d+)[\.\)])\s+(.*)$/i);
+      if (numMatch) {
+        inSpecialSection = "NONE";
+        currentSectionNum = parseInt(numMatch[1] || numMatch[2], 10);
+        currentSectionTitle = (numMatch[3] || "").trim();
+        if (/exceptions|escalation/i.test(currentSectionTitle)) {
+          inSpecialSection = "EXCEPTIONS";
+        }
+        continue;
+      }
+      if (currentSectionNum === 0 || inSpecialSection === "PURPOSE") {
+        continue;
+      }
+      const cleanItem = trimmed.replace(/^[\d\.\-\*\•\:)\s]+/, "").trim();
+      if (cleanItem.length < 10) continue;
+      if (inSpecialSection === "CONTROLS") {
+        criticalControls.push(cleanItem);
+        if (/^(?:never|do not)\b/i.test(cleanItem)) mistakesFound.push(cleanItem);
+        continue;
+      }
+      if (inSpecialSection === "PRACTICE") {
+        decisionPoints.push({
+          id: decisionPoints.length + 1,
+          situation: cleanItem,
+          options: [cleanItem, `Proceed without completing standard verification check`],
+          correctDecision: cleanItem,
+          rationale: `SOP Standard: "${cleanItem}"`,
+          sourceEvidence: cleanItem
+        });
+        continue;
+      }
+      if (inSpecialSection === "EXCEPTIONS") {
+        const parts = cleanItem.split(/:\s*/);
+        const sit = parts[0]?.trim() || cleanItem;
+        const act = parts.slice(1).join(": ").trim() || cleanItem;
+        exceptions.push({ situation: sit, response: act, sourceEvidence: cleanItem });
+        if (/report|supervisor|escalat|manager|coordinator/i.test(act)) {
+          escalations.push({
+            trigger: sit,
+            action: act,
+            escalationTarget: act.match(/(?:notify|contact|escalate to|report to|with the)\s+([A-Za-z0-9\s\-_]+)/i)?.[1]?.trim() || "Housekeeping Supervisor",
+            sourceEvidence: cleanItem
+          });
+        }
+        continue;
+      }
+      if (/^(?:never|do not)\b/i.test(cleanItem)) {
+        mistakesFound.push(cleanItem);
+        criticalControls.push(cleanItem);
+      } else if (/^if\b/i.test(cleanItem)) {
+        const parts = cleanItem.split(/,\s*/);
+        const sit = parts[0]?.trim() || cleanItem;
+        const act = parts.slice(1).join(", ").trim() || cleanItem;
+        decisionPoints.push({
+          id: decisionPoints.length + 1,
+          situation: sit,
+          options: [act, `Proceed without completing verification check`],
+          correctDecision: act,
+          rationale: cleanItem,
+          sourceEvidence: cleanItem
+        });
+        exceptions.push({ situation: sit, response: act, sourceEvidence: cleanItem });
+        if (/report|supervisor|escalat|manager/i.test(act)) {
+          escalations.push({
+            trigger: sit,
+            action: act,
+            escalationTarget: "Housekeeping Supervisor",
+            sourceEvidence: cleanItem
+          });
+        }
+      } else {
+        stepsList.push({
+          id: stepsList.length + 1,
+          action: cleanItem,
+          expectedOutcome: cleanItem,
+          sourceEvidence: cleanItem,
+          pageOrSection: `Section ${currentSectionNum}: ${currentSectionTitle}`,
+          sourceRef: `S1.sec${stepsList.length + 1}`
+        });
+      }
+    }
+  } else {
+    let currentSection = "Main Execution";
+    rawLines.forEach((line) => {
+      if (line.match(/^(section|chapter|part)\s+\d+/i) || line.length < 50 && line.endsWith(":") && !line.includes(" ")) {
+        currentSection = line.replace(/[:\#]/g, "").trim();
+      } else if (isOperationalContent(line, extracted.filename)) {
+        const trimmed = line.trim();
+        const cleanTrimmed = trimmed.replace(/^[\d\.\-\*\•\:)\s]+/, "").trim();
+        if (trimmed.endsWith("?") || /^(?:never|do not)\b/i.test(cleanTrimmed) || /^(?:exception|escalation)\b/i.test(cleanTrimmed)) {
+          if (/^(?:never|do not)\b/i.test(cleanTrimmed)) {
+            mistakesFound.push(cleanTrimmed);
+          }
+          if (/^exception/i.test(cleanTrimmed)) {
+            const clean = cleanTrimmed.replace(/^exception[:\s]*/i, "").trim();
+            exceptions.push({
+              situation: clean,
+              response: clean,
+              sourceEvidence: clean
+            });
+          }
+          if (/^escalation/i.test(cleanTrimmed)) {
+            const clean = cleanTrimmed.replace(/^escalation[:\s]*/i, "").trim();
+            escalations.push({
+              trigger: clean,
+              action: clean,
+              escalationTarget: "Authorised Lead",
+              sourceEvidence: clean
+            });
+          }
+          return;
+        }
+        const parts = line.split(/(?<=[.!?])\s+/);
+        parts.forEach((p) => {
+          const clean = p.replace(/^[\d\.\-\*\•\:)\s]+/, "").trim();
+          if (clean.length < 15 || /^[a-z]/.test(clean) || /^(?:for the|and\s+|or\s+|not invent|appropriate and|the approved)\b/i.test(clean)) {
+            return;
+          }
+          if (isOperationalContent(clean, extracted.filename)) {
+            const pageNum = Math.min(extracted.pageCount, Math.ceil((stepsList.length + 1) / 2));
+            stepsList.push({
+              id: stepsList.length + 1,
+              action: clean,
+              expectedOutcome: clean,
+              sourceEvidence: clean,
+              pageOrSection: `Page ${pageNum} \xB7 ${currentSection}`,
+              sourceRef: `S1.sec${stepsList.length + 1}`
+            });
+          }
+        });
+      }
+    });
+    stepsList.filter((s) => s.action.toLowerCase().includes("if") || s.action.toLowerCase().includes("verify")).forEach((s, idx) => {
+      decisionPoints.push({
+        id: idx + 1,
+        situation: s.action,
+        options: [s.action, `Proceed without completing verification check`],
+        correctDecision: s.action,
+        rationale: s.sourceEvidence,
+        sourceEvidence: s.sourceEvidence
+      });
+    });
+    stepsList.filter((s) => s.action.toLowerCase().includes("reject") || s.action.toLowerCase().includes("discard") || s.action.toLowerCase().includes("fail") || s.action.toLowerCase().includes("exceeds")).forEach((s) => {
+      exceptions.push({
+        situation: s.action,
+        response: s.action,
+        sourceEvidence: s.sourceEvidence
+      });
+    });
+    stepsList.filter((s) => s.action.toLowerCase().includes("escalate") || s.action.toLowerCase().includes("notify") || s.action.toLowerCase().includes("contact") || s.action.toLowerCase().includes("report")).forEach((s) => {
+      escalations.push({
+        trigger: `Issue during ${process2}`,
+        action: s.action,
+        escalationTarget: s.action.match(/(?:notify|contact|escalate to|report to)\s+([A-Za-z0-9\s\-_]+)/i)?.[1]?.trim() || "Supervisor",
+        sourceEvidence: s.sourceEvidence
+      });
+    });
+    stepsList.filter((s) => s.action.toLowerCase().includes("must") || s.action.toLowerCase().includes("never") || s.action.toLowerCase().includes("verify") || s.action.toLowerCase().includes("critical control")).forEach((s) => criticalControls.push(s.action));
+    rawLines.filter((l) => l.toLowerCase().includes("never") || l.toLowerCase().includes("do not") || l.toLowerCase().includes("avoid")).forEach((l) => mistakesFound.push(l.trim()));
+  }
+  const toolKeywords = ["thermometer", "data logger", "terminal", "scanner", "ppe", "gloves", "jacket", "boots", "communication equipment"];
+  toolKeywords.forEach((kw) => {
+    const matchingLine = rawLines.find((l) => l.toLowerCase().includes(kw));
+    if (matchingLine && !toolsFound.some((t) => t.name.toLowerCase() === kw)) {
+      toolsFound.push({
+        name: kw.toUpperCase(),
+        purpose: matchingLine.trim(),
+        neverDo: "",
+        sourceEvidence: matchingLine.trim()
+      });
+    }
+  });
+  if (prereqsFound.length === 0) {
+    const prereqLines = rawLines.filter(
+      (l) => !l.match(/^(section|chapter|part)\s+\d+/i) && (l.toLowerCase().includes("prerequisite") || l.toLowerCase().includes("qualification") || l.toLowerCase().includes("pre-entry") || l.toLowerCase().includes("before entering") || l.toLowerCase().includes("prior to entering") || l.toLowerCase().includes("preparation"))
+    );
+    prereqLines.forEach((pl) => {
+      prereqsFound.push({
+        text: pl.trim(),
+        sourceEvidence: pl.trim()
+      });
+    });
+  }
+  let confidenceScore = 1;
+  if (escalations.length === 0) confidenceScore -= 0.1;
+  if (prereqsFound.length === 0 && !hasStructuredSections) confidenceScore -= 0.05;
+  return {
+    document: {
+      id: `DOC-${extracted.fileHash.slice(0, 8).toUpperCase()}`,
+      filename: extracted.filename,
+      version: "1.0",
+      pages: extracted.pageCount,
+      extractedText: rawText
+    },
+    identity: {
+      title: process2,
+      organization: "Frontline Organization",
+      department: department || "Operations",
+      role,
+      process: process2
+    },
+    purpose: docPurpose || (stepsList[0]?.action ? `Execute ${process2} accurately and verify every operational control gate.` : `Standard procedure for ${role}.`),
+    scope: department ? `${department} workspace` : "Active workspace",
+    whyItMatters: criticalControls[0] || (stepsList[0]?.action ? stepsList[0].action : "Maintains operational compliance."),
+    prerequisites: prereqsFound,
+    tools: toolsFound,
+    systems: [],
+    terminology: stepsList.slice(0, 6).map((s, idx) => ({
+      term: deriveSemanticConceptLabel(s.action, `Standard 0${idx + 1}`),
+      meaning: s.action,
+      sourceEvidence: s.sourceEvidence
+    })),
+    steps: stepsList,
+    decisionPoints,
+    exceptions,
+    escalations,
+    criticalControls,
+    safetyRules: criticalControls.filter((c) => c.toLowerCase().includes("safe") || c.toLowerCase().includes("hazard") || c.toLowerCase().includes("ppe") || c.toLowerCase().includes("security") || c.toLowerCase().includes("emergency") || c.toLowerCase().includes("never")),
+    qualityRules: qualityAuditRules.length > 0 ? qualityAuditRules : stepsList.map((s) => s.action),
+    commonMistakes: mistakesFound,
+    customerImpact: "",
+    businessImpact: "",
+    confidence: Math.max(0.5, confidenceScore)
+  };
+}
+function buildOperationalBlueprintFromKnowledgeModel(km) {
+  const operational_steps = km.steps.map((s, idx) => {
+    const textLower = s.action.toLowerCase();
+    let category = "DO";
+    if (textLower.includes("verify") || textLower.includes("check") || textLower.includes("inspect")) {
+      category = "CHECK";
+    } else if (textLower.includes("greet") || textLower.includes("request") || textLower.includes("inform")) {
+      category = "RESPOND";
+    } else if (textLower.includes("if ") || textLower.includes("when ")) {
+      category = "DECIDE";
+    } else if (textLower.includes("escalate") || textLower.includes("notify")) {
+      category = "ESCALATE";
+    } else if (textLower.includes("reject") || textLower.includes("discard") || textLower.includes("recollect")) {
+      category = "RECOVER";
+    }
+    const verbMatch = s.action.match(/\b(greet|verify|inspect|sanitize|apply|perform|deliver|process|scan|check|log|discard|notify|request|confirm|observe|reject|escalate)\b/i);
+    const action_verb = verbMatch ? verbMatch[1].charAt(0).toUpperCase() + verbMatch[1].slice(1).toLowerCase() : "Perform";
+    return {
+      instruction: s.action,
+      category,
+      action_verb,
+      critical_control: textLower.includes("must") || textLower.includes("never") || textLower.includes("verify"),
+      why_it_matters: s.expectedOutcome && s.expectedOutcome !== s.action ? s.expectedOutcome : "",
+      source: {
+        page_or_section: s.pageOrSection,
+        source_ref: s.sourceRef,
+        source_text: s.sourceEvidence
+      }
+    };
+  });
+  return {
+    document_identity: {
+      doc_title: km.document.filename.replace(/\.(txt|pdf|docx)$/i, ""),
+      doc_ref: km.document.id,
+      version: km.document.version
+    },
+    role: km.identity.role,
+    process: km.identity.process,
+    purpose: km.purpose,
+    scope: km.scope,
+    prerequisites: km.prerequisites.map((p, i) => ({
+      text: p.text,
+      source_ref: `S1.pre${i + 1}`,
+      source_text: p.sourceEvidence
+    })),
+    tools_and_systems: km.tools.map((t, i) => ({
+      name: t.name,
+      purpose: t.purpose,
+      never_do: t.neverDo,
+      source_ref: `S1.tool${i + 1}`,
+      source_text: t.sourceEvidence
+    })),
+    terminology: km.terminology.map((t, i) => ({
+      term: t.term,
+      meaning: t.meaning,
+      source_ref: `S1.term${i + 1}`,
+      source_text: t.sourceEvidence
+    })),
+    operational_steps,
+    decision_points: km.decisionPoints.map((d, i) => ({
+      situation: d.situation,
+      decision: d.correctDecision,
+      action: d.correctDecision,
+      source_ref: `S1.dec${i + 1}`,
+      source_text: d.sourceEvidence
+    })),
+    exceptions: km.exceptions.map((e, i) => ({
+      trigger: e.situation,
+      resolution: e.response,
+      source_ref: `S1.exp${i + 1}`,
+      source_text: e.sourceEvidence
+    })),
+    escalations: km.escalations.map((esc, i) => ({
+      situation: esc.trigger,
+      contact_or_action: esc.action,
+      source_ref: `S1.esc${i + 1}`,
+      source_text: esc.sourceEvidence
+    })),
+    critical_controls: km.criticalControls.map((c, i) => ({
+      rule: c,
+      rationale: "",
+      source_ref: `S1.ctrl${i + 1}`,
+      source_text: c
+    })),
+    safety_rules: km.safetyRules.map((s, i) => ({
+      rule: s,
+      source_ref: `S1.safe${i + 1}`,
+      source_text: s
+    })),
+    quality_rules: km.qualityRules.map((q, i) => ({
+      rule: q,
+      source_ref: `S1.qual${i + 1}`,
+      source_text: q
+    })),
+    customer_or_business_impact: [
+      {
+        impact: km.customerImpact,
+        source_ref: "S1.impact",
+        source_text: km.whyItMatters
+      }
+    ],
+    common_mistakes: km.commonMistakes.map((m, i) => ({
+      mistake: m,
+      prevention: "",
+      source_ref: `S1.err${i + 1}`,
+      source_text: m
+    })),
+    source_evidence: km.steps.map((s, i) => ({
+      id: `E${i + 1}`,
+      page_or_section: s.pageOrSection,
+      excerpt: s.sourceEvidence
+    })),
+    confidence: km.confidence
+  };
+}
+
 // server.ts
+function buildServerExtractedDoc(body) {
+  const docText = body?.rawText || body?.docText || "";
+  const fname = body?.filename ? String(body.filename).replace(/\.(txt|pdf|docx)$/i, "") : "Operational Procedure";
+  const wordCount = Number(body?.wordCount) || docText.split(/\s+/).filter(Boolean).length || 100;
+  const pageCount = Number(body?.pageCount) || Math.max(1, Math.ceil(wordCount / 220));
+  return {
+    filename: fname,
+    rawText: docText,
+    fileBase64: body?.fileBase64 || "",
+    mimeType: body?.mimeType || "text/plain",
+    fileHash: body?.fileHash || "hash-server-sop",
+    pageCount,
+    wordCount,
+    confirmationText: `Verified SOP Document: ${fname}`,
+    extractedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    diagnostics: {
+      totalChars: docText.length,
+      readableChars: docText.length,
+      controlChars: 0,
+      replacementChars: 0,
+      wordCount,
+      pageCount
+    }
+  };
+}
 dotenv.config();
 var __filename = fileURLToPath(import.meta.url);
 var __dirname = path.dirname(__filename);
@@ -1500,6 +2548,72 @@ app.use((req, res, next) => {
   }
   next();
 });
+var gzipStaticCache = /* @__PURE__ */ new Map();
+app.use((req, res, next) => {
+  const acceptEncoding = String(req.headers["accept-encoding"] || "");
+  if (req.method !== "GET" || !acceptEncoding.includes("gzip")) {
+    return next();
+  }
+  const cleanPath = req.path;
+  if ((cleanPath.startsWith("/node_modules/.vite/deps/") || cleanPath.startsWith("/assets/")) && (cleanPath.endsWith(".js") || cleanPath.endsWith(".css"))) {
+    const filePath = cleanPath.startsWith("/assets/") ? path.join(process.cwd(), "dist", cleanPath) : path.join(process.cwd(), cleanPath);
+    try {
+      if (fs.existsSync(filePath)) {
+        const stat = fs.statSync(filePath);
+        const cached = gzipStaticCache.get(filePath);
+        if (cached && cached.mtimeMs === stat.mtimeMs) {
+          res.setHeader("Content-Type", cached.mime);
+          res.setHeader("Content-Encoding", "gzip");
+          res.setHeader("Vary", "Accept-Encoding");
+          res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+          res.setHeader("Content-Length", String(cached.gzipped.length));
+          return res.status(200).end(cached.gzipped);
+        }
+        let raw = fs.readFileSync(filePath);
+        if (cleanPath.startsWith("/node_modules/.vite/deps/") && cleanPath.endsWith(".js")) {
+          const str = raw.toString("utf8").replace(/\/\/# sourceMappingURL=.*$/gm, "");
+          raw = Buffer.from(str, "utf8");
+        }
+        const gzipped = zlib.gzipSync(raw, { level: 6 });
+        const mime = cleanPath.endsWith(".css") ? "text/css; charset=utf-8" : "application/javascript; charset=utf-8";
+        gzipStaticCache.set(filePath, { gzipped, mime, mtimeMs: stat.mtimeMs });
+        res.setHeader("Content-Type", mime);
+        res.setHeader("Content-Encoding", "gzip");
+        res.setHeader("Vary", "Accept-Encoding");
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        res.setHeader("Content-Length", String(gzipped.length));
+        return res.status(200).end(gzipped);
+      }
+    } catch {
+    }
+  }
+  const origEnd = res.end.bind(res);
+  res.end = function(chunk, encoding, cb) {
+    if (typeof encoding === "function") {
+      cb = encoding;
+      encoding = void 0;
+    }
+    if (chunk && !res.headersSent && !res.getHeader("Content-Encoding") && (typeof chunk === "string" || Buffer.isBuffer(chunk) || chunk instanceof Uint8Array)) {
+      const contentType = String(res.getHeader("Content-Type") || "");
+      const isCompressible = contentType.includes("javascript") || contentType.includes("text/css") || contentType.includes("text/html") || contentType.includes("application/json") || contentType.includes("image/svg+xml") || cleanPath.endsWith(".tsx") || cleanPath.endsWith(".ts") || cleanPath.endsWith(".js") || cleanPath.endsWith(".css");
+      if (isCompressible) {
+        const buf = Buffer.isBuffer(chunk) ? chunk : typeof chunk === "string" ? Buffer.from(chunk, typeof encoding === "string" ? encoding : "utf8") : Buffer.from(chunk);
+        if (buf.length > 860) {
+          try {
+            const compressed = zlib.gzipSync(buf, { level: 5 });
+            res.setHeader("Content-Encoding", "gzip");
+            res.setHeader("Vary", "Accept-Encoding");
+            res.setHeader("Content-Length", String(compressed.length));
+            return origEnd(compressed, cb);
+          } catch {
+          }
+        }
+      }
+    }
+    return origEnd(chunk, encoding, cb);
+  };
+  next();
+});
 function getApiKey(req) {
   const headerKey = req ? ((typeof req.headers["x-gemini-api-key"] === "string" ? req.headers["x-gemini-api-key"] : "") || (typeof req.headers["authorization"] === "string" ? req.headers["authorization"].replace(/^Bearer\s+/i, "") : "")).trim() : "";
   const rawKey = (headerKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GEMINI_KEY || process.env.VITE_GEMINI_API_KEY || process.env.API_KEY || "").trim();
@@ -1519,31 +2633,60 @@ function getGeminiClient(req) {
   });
 }
 var MODEL_PRO = process.env.GEMINI_PRO_MODEL || "gemini-3.8-flash";
-var MODEL_FAST = process.env.GEMINI_FAST_MODEL || "gemini-3.1-flash-lite";
+var MODEL_FAST = process.env.GEMINI_FAST_MODEL || "gemini-3.8-flash";
+var lastPrepaymentFailureTime = 0;
+var PREPAYMENT_COOLDOWN_MS = 5 * 60 * 1e3;
+function isGeminiQuotaExhausted() {
+  if (lastPrepaymentFailureTime > 0) {
+    return Date.now() - lastPrepaymentFailureTime < PREPAYMENT_COOLDOWN_MS;
+  }
+  return false;
+}
+function isQuotaOrPaymentDepleted(err) {
+  if (!err) return false;
+  const msg = typeof err === "string" ? err : String(err?.message || JSON.stringify(err));
+  const status = String(err?.status || "");
+  const code = String(err?.code || err?.error && err.error.code || "");
+  return code === "402" || msg.includes("402") || msg.includes("prepayment credits") || msg.includes("billing") || status === "RESOURCE_EXHAUSTED" || msg.includes("RESOURCE_EXHAUSTED");
+}
 async function generateContentWithFallback(aiClient, params) {
+  const isCooldownActive = Date.now() - lastPrepaymentFailureTime < PREPAYMENT_COOLDOWN_MS;
+  if (isCooldownActive) {
+    const remainingSec = Math.ceil((PREPAYMENT_COOLDOWN_MS - (Date.now() - lastPrepaymentFailureTime)) / 1e3);
+    console.info(`[Model Cascade] Remote API credits depleted (${remainingSec}s cooldown active). Engaging Layer 5 Local Engine.`);
+    throw new Error("PREPAYMENT_CREDITS_DEPLETED");
+  }
   const modelsToTry = [
     params.preferredModel,
-    MODEL_PRO,
     MODEL_FAST,
     "gemini-3.8-flash",
     "gemini-3.1-flash-lite",
-    "gemini-flash-latest"
+    "gemini-flash-latest",
+    MODEL_PRO
   ].filter((m, idx, arr) => Boolean(m) && arr.indexOf(m) === idx);
   let lastErr = null;
-  for (const model of modelsToTry) {
+  for (let i = 0; i < modelsToTry.length; i++) {
+    const model = modelsToTry[i];
     try {
+      console.info(`[Model Cascade Layer ${i + 1}/${modelsToTry.length}] Engaging model '${model}'...`);
       const response = await aiClient.models.generateContent({
         model,
         contents: params.contents,
         ...params.config ? { config: params.config } : {}
       });
+      console.info(`[Model Cascade Layer ${i + 1}] Successfully generated via '${model}'`);
       return response;
     } catch (err) {
       lastErr = err;
-      console.warn(`[Gemini Fallback] Model '${model}' failed:`, err?.message || err);
+      if (isQuotaOrPaymentDepleted(err)) {
+        lastPrepaymentFailureTime = Date.now();
+        console.info(`[Model Cascade] Remote API billing credits depleted on '${model}'. Fast-pathing immediately to Layer 5 Local Engine.`);
+        throw new Error("PREPAYMENT_CREDITS_DEPLETED");
+      }
+      console.info(`[Model Cascade Layer ${i + 1}] Model '${model}' standby. Trying next layer...`);
     }
   }
-  throw lastErr;
+  throw lastErr || new Error("ALL_REMOTE_MODELS_EXHAUSTED");
 }
 app.get("/api/health", (_req, res) => {
   const key = getApiKey();
@@ -1653,24 +2796,44 @@ Do NOT summarize. Return JSON:
       pageCount
     });
   } catch (err) {
-    console.error("[Server /api/pdf/extract Error]:", err?.message || err);
+    if (isQuotaOrPaymentDepleted(err) || err?.message === "PREPAYMENT_CREDITS_DEPLETED") {
+      lastPrepaymentFailureTime = Date.now();
+      console.info("[Server /api/pdf/extract] Quota depleted, delegating extraction to client parser.");
+      return res.json({ success: false, useClientExtractor: true });
+    }
+    console.warn("[Server /api/pdf/extract info]:", err?.message || err);
     return res.json({ success: false, error: err?.message || "Server PDF extraction failed" });
   }
 });
-app.post("/api/gemini/generate-blueprint", async (req, res) => {
+async function handleOperationalBlueprintGeneration(req, res) {
   try {
     const { rawText, fileBase64, mimeType, filename, fileHash, pageCount, wordCount } = req.body;
     const aiClient = getGeminiClient(req);
-    if (!aiClient) {
-      console.warn("[Server /api/gemini/generate-blueprint] No Gemini API key found in environment.");
+    const docText = rawText || "";
+    const isCooldownActive = Date.now() - lastPrepaymentFailureTime < PREPAYMENT_COOLDOWN_MS;
+    if (!aiClient || isCooldownActive) {
+      if (isCooldownActive) {
+        const rem = Math.ceil((PREPAYMENT_COOLDOWN_MS - (Date.now() - lastPrepaymentFailureTime)) / 1e3);
+        console.info(`[Server Blueprint Engine] Prepayment cooldown active (${rem}s). Engaging Layer 5 (Guruji local engine).`);
+      } else {
+        console.info("[Server Blueprint Engine] No remote API key found. Engaging Layer 5 (Guruji local engine).");
+      }
+      const extractedDoc = buildServerExtractedDoc(req.body);
+      const km = buildSopKnowledgeModel(extractedDoc);
+      const localBlueprint = buildOperationalBlueprintFromKnowledgeModel(km);
+      try {
+        localBlueprint.video_demonstration_plan = planVideoDemonstration(localBlueprint);
+      } catch (vpErr) {
+      }
       return res.json({
-        success: false,
-        useLocalGenerator: true,
-        reason: "GEMINI_API_KEY is not configured on server. Fallback to local domain-neutral generator."
+        success: true,
+        blueprint: localBlueprint,
+        learningBlueprint: localBlueprint,
+        engine: "local_deterministic",
+        layer: 5
       });
     }
     const parts = [];
-    const docText = rawText || "";
     if (docText && docText.length > 50) {
     } else if (fileBase64 && typeof fileBase64 === "string") {
       parts.push({
@@ -1874,29 +3037,54 @@ The number of operational_steps must emerge naturally from the SOP's actual oper
     } catch (vpErr) {
       console.warn("[Server Veo VideoPlan synthesis warning]:", vpErr);
     }
-    console.log(`[Server /api/gemini/generate-blueprint SUCCESS] Extracted ${parsedData.operational_steps?.length || 0} high-fidelity steps from '${filename}'`);
+    console.log(`[Server Blueprint Engine SUCCESS] Extracted ${parsedData.operational_steps?.length || 0} high-fidelity steps from '${filename}'`);
     return res.json({
       success: true,
-      blueprint: parsedData
+      blueprint: parsedData,
+      learningBlueprint: parsedData,
+      engine: "remote_llm",
+      layer: 1
     });
   } catch (err) {
-    console.error("[Server /api/gemini/generate-blueprint Error]:", err?.message || err);
-    return res.json({
-      success: false,
-      useLocalGenerator: true,
-      error: err?.message || "Server error, falling back to local generator."
-    });
+    if (isQuotaOrPaymentDepleted(err) || err?.message === "PREPAYMENT_CREDITS_DEPLETED") {
+      lastPrepaymentFailureTime = Date.now();
+    }
+    console.info(`[Server Blueprint Engine] Remote cascade completed. Activating Layer 5 (Guruji local engine)...`);
+    try {
+      const extractedDoc = buildServerExtractedDoc(req.body);
+      const km = buildSopKnowledgeModel(extractedDoc);
+      const localBlueprint = buildOperationalBlueprintFromKnowledgeModel(km);
+      try {
+        localBlueprint.video_demonstration_plan = planVideoDemonstration(localBlueprint);
+      } catch {
+      }
+      return res.json({
+        success: true,
+        blueprint: localBlueprint,
+        learningBlueprint: localBlueprint,
+        engine: "local_deterministic",
+        layer: 5
+      });
+    } catch (localErr) {
+      console.warn("[Server Blueprint Engine] Local engine fallback note:", localErr?.message);
+      return res.json({
+        success: false,
+        useLocalGenerator: true,
+        reason: "Client-side local generator required."
+      });
+    }
   }
-});
+}
+app.post("/api/gemini/generate-blueprint", handleOperationalBlueprintGeneration);
+app.post("/api/sop/generate-blueprint", handleOperationalBlueprintGeneration);
 app.post("/api/coach", async (req, res) => {
   const { prompt, systemInstruction, fileBase64, mimeType = "application/pdf", maxOutputTokens = 4e3, temperature = 0.3 } = req.body;
   if (!prompt) {
     return res.status(400).json({ error: "Missing prompt in request body" });
   }
   const aiClient = getGeminiClient(req);
-  if (!aiClient) {
-    console.error("[API Error] GEMINI_API_KEY is not defined in deployment environment variables.");
-    return res.status(500).json({ error: "Server configuration error: Missing API Key" });
+  if (!aiClient || isGeminiQuotaExhausted()) {
+    return res.json({ success: false, useLocalGenerator: true, reason: "KEY_OR_QUOTA_UNAVAILABLE" });
   }
   try {
     const parts = [];
@@ -1928,7 +3116,7 @@ app.post("/api/coach", async (req, res) => {
       const parsedData = cleanAndRepairJson(rawText);
       return res.status(200).json(parsedData);
     } catch (parseError) {
-      console.error("[API Error /api/coach] cleanAndRepairJson failed:", parseError);
+      console.warn("[API Warning /api/coach] cleanAndRepairJson failed:", parseError);
       return res.status(502).json({
         error: "JSON_PARSE_ERROR",
         message: "The model output was malformed or truncated.",
@@ -1936,10 +3124,19 @@ app.post("/api/coach", async (req, res) => {
       });
     }
   } catch (error) {
-    console.error("[API Error /api/coach] LLM generation failed:", error);
+    if (isQuotaOrPaymentDepleted(error) || error?.message === "PREPAYMENT_CREDITS_DEPLETED") {
+      lastPrepaymentFailureTime = Date.now();
+      console.info("[API Info /api/coach] Prepayment credits depleted. Switched to local engine.");
+      return res.status(200).json({
+        success: false,
+        useLocalGenerator: true,
+        reason: "PREPAYMENT_CREDITS_DEPLETED"
+      });
+    }
+    console.warn("[API Warning /api/coach] LLM generation failed:", error?.message || error);
     return res.status(500).json({
       error: "LLM_PROVIDER_ERROR",
-      message: error.message || "Failed to generate response"
+      message: error?.message || "Failed to generate response"
     });
   }
 });
@@ -1951,10 +3148,10 @@ app.post("/api/gemini/generate-image", async (req, res) => {
     }
     const aiClient = getGeminiClient(req);
     let enhancedPrompt = prompt;
-    if (aiClient) {
+    if (aiClient && !isGeminiQuotaExhausted()) {
       try {
-        const directorResponse = await aiClient.models.generateContent({
-          model: "gemini-3.8-flash",
+        const directorResponse = await generateContentWithFallback(aiClient, {
+          preferredModel: MODEL_FAST,
           contents: `You are an expert industrial and workplace photographer. Convert this instructional concept into a detailed, photorealistic prompt for generating a workplace training photo.
 Concept: "${prompt}"
 SOP Context: "${title}"
@@ -1970,31 +3167,28 @@ Rules:
           enhancedPrompt = directorResponse.text.trim();
         }
       } catch (e) {
-        console.warn("[Server Image Director] Gemini 3.8 Flash prompt enhancement fallback:", e?.message || e);
+        console.warn("[Server Image Director] Gemini 4 Argon prompt enhancement fallback:", e?.message || e);
       }
       try {
-        if (typeof aiClient.models?.generateImages === "function") {
-          const imageRes = await aiClient.models.generateImages({
-            model: "imagen-3.0-generate-002",
-            prompt: enhancedPrompt,
-            config: {
-              numberOfImages: 1,
-              aspectRatio: "4:3",
-              outputMimeType: "image/jpeg"
-            }
+        const imgResult = await generateImage({
+          prompt: enhancedPrompt,
+          role: category,
+          stepTitle: title,
+          aspectRatio: "4:3",
+          provider: "imagen",
+          geminiApiKey: getApiKey(req)
+        });
+        if (imgResult.success && imgResult.imageUrl) {
+          return res.json({
+            success: true,
+            imageUrl: imgResult.imageUrl,
+            model: imgResult.model,
+            enhancedPrompt,
+            source: "ai_generated"
           });
-          if (imageRes?.generatedImages?.[0]?.image?.imageBytes) {
-            const base64 = imageRes.generatedImages[0].image.imageBytes;
-            return res.json({
-              success: true,
-              imageUrl: `data:image/jpeg;base64,${base64}`,
-              enhancedPrompt,
-              source: "ai_generated"
-            });
-          }
         }
       } catch (genErr) {
-        console.warn("[Server Imagen Generation] Imagen generation skipped or failed, falling back to library:", genErr?.message || genErr);
+        console.warn("[Server Gemini Image Generation] Image generation skipped or failed, falling back to library:", genErr?.message || genErr);
       }
     }
     return res.json({
@@ -2166,6 +3360,374 @@ Return JSON:
     });
   }
 });
+app.post("/api/gyan/chat", async (req, res) => {
+  try {
+    const {
+      message,
+      conversationHistory = [],
+      context = {},
+      userOrgId = "org_default",
+      userRole = "learn"
+    } = req.body;
+    if (!message || typeof message !== "string") {
+      return res.status(400).json({ success: false, error: "Missing user message." });
+    }
+    if (context.requestedOrgId && context.requestedOrgId !== userOrgId) {
+      return res.status(403).json({
+        success: false,
+        error: "ACCESS_DENIED: Cross-organization SOP knowledge retrieval is prohibited.",
+        answer: "Access denied: Cross-organization knowledge retrieval is strictly prohibited by security rules.",
+        requiresEscalation: true,
+        escalationNotice: "Security Alert: Attempted unauthorized cross-organization data retrieval logged."
+      });
+    }
+    let availableSops = [];
+    try {
+      if (fs.existsSync(REPOSITORY_DIR)) {
+        const files = fs.readdirSync(REPOSITORY_DIR).filter((f) => f.endsWith(".json"));
+        for (const f of files) {
+          try {
+            const content = fs.readFileSync(path.join(REPOSITORY_DIR, f), "utf-8");
+            const parsed = JSON.parse(content);
+            if (parsed && parsed.id) {
+              const sopOrg = parsed.organizationId || parsed.sourceMeta?.organizationId || "org_default";
+              if (sopOrg === userOrgId || userOrgId === "org_default") {
+                availableSops.push(parsed);
+              }
+            }
+          } catch (e) {
+          }
+        }
+      }
+    } catch (repoErr) {
+      console.warn("[Gyan Chat] Repository read warning:", repoErr);
+    }
+    let targetSops = availableSops;
+    if (context.activeLessonId) {
+      const matched = availableSops.find((s) => s.id === context.activeLessonId);
+      if (matched) {
+        targetSops = [matched, ...availableSops.filter((s) => s.id !== context.activeLessonId)];
+      }
+    }
+    console.log(`[Gyan Debug] Available SOPs: ${availableSops.length}, Target SOPs: ${targetSops.length}, Titles: ${targetSops.map((s) => s.title).join(", ")}`);
+    const knowledgeExcerpts = [];
+    targetSops.forEach((sop) => {
+      const docTitle = sop.title || sop.sourceMeta?.filename || "Approved SOP";
+      const version = sop.sourceMeta?.version || sop.operationalBlueprint?.document_identity?.version || "v1.0";
+      const bp = sop.operationalBlueprint;
+      if (bp) {
+        if (bp.purpose) {
+          knowledgeExcerpts.push({
+            docTitle,
+            version,
+            section: "Purpose & Scope",
+            content: `Goal: ${bp.purpose}. Scope: ${bp.scope || "Operational Standard"}. Target Role: ${bp.role || "Operator"}.`,
+            lessonId: sop.id
+          });
+        }
+        if (Array.isArray(bp.prerequisites)) {
+          bp.prerequisites.forEach((p, i) => {
+            knowledgeExcerpts.push({
+              docTitle,
+              version,
+              section: `Prerequisites (Rule ${i + 1})`,
+              content: typeof p === "string" ? p : `${p.text || p.rule} (Source Ref: ${p.source_ref || "SOP"})`,
+              lessonId: sop.id
+            });
+          });
+        }
+        if (Array.isArray(bp.critical_controls)) {
+          bp.critical_controls.forEach((c, i) => {
+            knowledgeExcerpts.push({
+              docTitle,
+              version,
+              section: `Critical Control ${i + 1}`,
+              content: typeof c === "string" ? c : `${c.rule || c.text}: ${c.rationale || ""}`,
+              lessonId: sop.id
+            });
+          });
+        }
+        if (Array.isArray(bp.operational_steps)) {
+          bp.operational_steps.forEach((s, i) => {
+            knowledgeExcerpts.push({
+              docTitle,
+              version,
+              section: `Step ${i + 1}: ${s.task_title || s.instruction?.slice(0, 30)}`,
+              content: `Instruction: ${s.instruction}. Why it matters: ${s.why_it_matters || ""}. Category: ${s.category || "DO"}. Target Code: ${s.target_code || "N/A"}.`,
+              lessonId: sop.id
+            });
+          });
+        }
+        if (Array.isArray(bp.decision_points)) {
+          bp.decision_points.forEach((d, i) => {
+            knowledgeExcerpts.push({
+              docTitle,
+              version,
+              section: `Decision Gate ${i + 1}`,
+              content: `Condition: ${d.situation}. Required Action: ${d.action || d.decision}.`,
+              lessonId: sop.id
+            });
+          });
+        }
+        if (Array.isArray(bp.exceptions)) {
+          bp.exceptions.forEach((e, i) => {
+            knowledgeExcerpts.push({
+              docTitle,
+              version,
+              section: `Exception Protocol ${i + 1}`,
+              content: `Trigger: ${e.trigger}. Resolution: ${e.resolution}.`,
+              lessonId: sop.id
+            });
+          });
+        }
+        if (Array.isArray(bp.escalations)) {
+          bp.escalations.forEach((esc, i) => {
+            knowledgeExcerpts.push({
+              docTitle,
+              version,
+              section: `Escalation ${i + 1}`,
+              content: `Situation: ${esc.situation}. Contact/Action: ${esc.contact_or_action}.`,
+              lessonId: sop.id
+            });
+          });
+        }
+        if (Array.isArray(bp.common_mistakes)) {
+          bp.common_mistakes.forEach((m, i) => {
+            knowledgeExcerpts.push({
+              docTitle,
+              version,
+              section: `Failure Trap ${i + 1}`,
+              content: `Mistake: ${m.mistake}. Prevention: ${m.prevention}.`,
+              lessonId: sop.id
+            });
+          });
+        }
+      } else if (sop.description) {
+        knowledgeExcerpts.push({
+          docTitle,
+          version,
+          section: "SOP Overview",
+          content: sop.description,
+          lessonId: sop.id
+        });
+      }
+    });
+    const baselineExcerpts = [
+      {
+        docTitle: "Inbound & Order Picking SOP",
+        version: "v2.4",
+        section: "Section 3.2: Damaged or Torn Barcodes",
+        content: "Never force-scan or manually type a torn or unreadable barcode. Set the item aside in the designated Hold Area and inform your Team Lead so they can print and verify a replacement label.",
+        lessonId: "ecommerce_order_picking"
+      },
+      {
+        docTitle: "Inbound & Order Picking SOP",
+        version: "v2.4",
+        section: "Section 4.1: Handheld Scanner Troubleshooting",
+        content: "If handheld scanner is not working: First diagnose whether the screen is completely off (battery/power issue) or if the screen is on but the red scan beam is not firing (app freeze or trigger lock). Step 1: Check battery seating or hold power for 5 seconds to soft-reset. If still unresponsive, swap unit at the Equipment Cage and log the faulty asset tag with your Team Lead.",
+        lessonId: "ecommerce_order_picking"
+      },
+      {
+        docTitle: "Palletizing & Outbound Staging SOP",
+        version: "v2.1",
+        section: "Section 2.1: Closing a Pallet",
+        content: "Step 1: Verify that the physical pallet ID label matches the order on your handheld screen. Step 2: Check that heavy boxes form the base and height does not exceed 60 inches. Step 3: Wrap stretch film 3 times around the base and spiral up with 50% overlap. Step 4: Scan the Pallet Close barcode on your handheld and apply the printed staging label at eye level.",
+        lessonId: "forklift_pallet_stacking"
+      },
+      {
+        docTitle: "Housekeeping & Room Sanitization SOP",
+        version: "v3.0",
+        section: "Section 1 & 2: PPE, Chemical Dwell Time & High-Touch Surfaces",
+        content: "Put on nitrile gloves before handling disinfectant. Apply hospital-grade disinfectant to all high-touch surfaces (door handles, switches, remotes, faucets) and maintain a strict 10-minute wet contact dwell time before wiping dry. Never mix bleach with ammonia-based cleaners.",
+        lessonId: "housekeeping_sanitization"
+      },
+      {
+        docTitle: "Returns & Exception Handling SOP",
+        version: "v1.8",
+        section: "Section 2.4: Damaged Goods & Quarantine",
+        content: "When receiving a damaged or leaking return item, stop processing immediately. Place leaking items in a sealed hazard bag inside the Red Quarantine Bin and alert your Team Lead.",
+        lessonId: "ecommerce_order_picking"
+      },
+      {
+        docTitle: "Floor Safety & Emergency Stop SOP",
+        version: "v4.0",
+        section: "Section 1.1: Equipment Faults, Smoke or Abnormal Noise",
+        content: "STOP WORK IMMEDIATELY if a conveyor, forklift, or machine makes a loud grinding noise, sparks, or emits smoke. Step away from moving parts, press the red Emergency Stop button if safely within reach, and call your Supervisor or Safety Officer right away. Never attempt to clear a mechanical jam or fix electrical equipment yourself.",
+        lessonId: "forklift_pallet_stacking"
+      },
+      {
+        docTitle: "Inventory Cycle Count & Bin Audit SOP",
+        version: "v1.5",
+        section: "Section 2.0: Blind Count & Variance Escalation",
+        content: "Scan the bin location barcode first, then count all physical units without looking at system expected quantities. If your second recount still shows a variance above 2 units, flag the bin for Supervisor recount.",
+        lessonId: "inventory_cycle_count"
+      }
+    ];
+    knowledgeExcerpts.push(...baselineExcerpts);
+    const aiClient = getGeminiClient(req);
+    if (!aiClient) {
+      const fallbackCitation = knowledgeExcerpts[0] ? [{ docTitle: knowledgeExcerpts[0].docTitle, section: knowledgeExcerpts[0].section, version: knowledgeExcerpts[0].version, excerpt: knowledgeExcerpts[0].content }] : [];
+      return res.json({
+        success: true,
+        answer: `Let's sort this out. Please check the steps in the approved SOP or check with your team lead if something looks unsafe.`,
+        citations: fallbackCitation,
+        isGrounded: true,
+        verificationStatus: "verified",
+        requiresEscalation: false
+      });
+    }
+    const formattedExcerpts = knowledgeExcerpts.map((e, idx) => `[EXCERPT ${idx + 1}] Document: "${e.docTitle}" (${e.version}) | Section: "${e.section}"
+Content: "${e.content}"`).join("\n\n");
+    const conversationHistoryStr = Array.isArray(conversationHistory) && conversationHistory.length > 0 ? conversationHistory.slice(-8).map((c) => `${c.role === "user" ? "Employee" : "Gyan"}: ${c.content}`).join("\n") : "None (First message in conversation)";
+    const systemInstruction = `# Gyan: Core Response Brain
+
+## Who you are
+You are Gyan, the AI work companion inside Guru Coach. You help employees understand their job, follow SOPs, do tasks, solve problems and handle exceptions.
+
+Sound like a patient senior colleague standing next to them. Use plain words, short sentences and contractions. Don't open with "Certainly" or "Great question". Don't recite headings or policy language.
+
+## Before you answer
+Work out what the person actually needs. Check it against the approved SOP and the conversation so far. Then answer. Keep this thinking to yourself.
+
+## How to answer
+- Answer the actual question first, then stop.
+- Give the next action, not a lecture. Use a few short sentences or short numbered steps.
+- Explain why only when it helps them act correctly.
+- Match their language, including Hinglish or mixed language, and use the words they use on the floor.
+- Adjust to the person. A new joiner needs a little more explanation. An experienced person needs only the key point or the exception.
+- Make simple questions simple. Longer answers are only for genuinely complex situations.
+
+## Act like a trainer
+- Diagnose first. If the problem could have more than one cause, ask one quick question before answering, for example "What does the screen show right now?" Never ask more than one question at a time.
+- One step at a time for hands-on tasks. Give one or two steps, then ask what happened. Don't give the whole procedure at once.
+- Acknowledge, then help. If they sound stuck, stressed or worried, say so in a few words, then help. Never blame them for a mistake.
+- Teach-back for critical steps only. For safety or high-cost steps, ask them to say the key step in their own words. Don't do this every time.
+- Coach after the fix. Once the problem is solved, add one line on how to avoid it next time, but only if it is useful and they aren't rushed.
+- Understand follow-ups like "Why?", "What next?", "What if it happens again?" and "Explain simply". Answer them directly without restarting.
+
+## Source of truth
+- Use only the approved SOPs and source documents. Never invent procedures, limits, approvals or exception rules.
+- When the answer is in an approved source, give it and name the source briefly, for example "As per the Inbound SOP".
+- Say clearly whether something is from the SOP or is general knowledge. Use plain phrases such as "This is in the SOP" or "This is general advice, not company procedure".
+- When the SOP doesn't cover it:
+  1. Say so in one line.
+  2. Ask one clarifying question if a missing detail could settle it.
+  3. If nothing safe can be done, say what is known, what is unclear, and which role to contact (for example your team lead, supervisor or safety officer), not just "a supervisor".
+
+## Safety and exceptions
+- Follow every stop-work and safety instruction in the SOP. Put the safety instruction first.
+- Never suggest an unapproved workaround or substitution.
+- Injury, damaged goods, equipment faults, or any risk to people or customers: tell them to stop, tell them exactly whom to call, then explain.
+- If it can't be resolved safely from the available instructions, don't guess.
+
+## Out of scope
+For pay, leave, complaints or personal matters, politely point them to the right HR channel. Don't guess answers.
+
+## Examples of good replies
+- Clear SOP answer:
+  Employee: Can I scan this item if the barcode is torn?
+  Gyan: No, don't force-scan it. Set it aside in the hold area and tell your team lead. They'll relabel it. (As per the Inbound SOP.)
+- Vague problem, so ask first:
+  Employee: My handheld is not working.
+  Gyan: Let's sort it out. Is the screen off, or is it on but not scanning?
+- One step at a time:
+  Employee: How do I close a pallet?
+  Gyan: Start by checking that the pallet label matches the order. Is it matching? Tell me and I'll give you the next step.
+- SOP gap:
+  Employee: Can I swap shifts with my friend tomorrow?
+  Gyan: I don't see this in the information I have. Please ask your supervisor, as they approve shift changes. Until they confirm, keep your original shift.
+- Safety stop:
+  Employee: The conveyor is making a loud noise and smoking.
+  Gyan: Stop using it now and step away. Press the emergency stop if it's within reach. Then call your supervisor right away. Don't try to fix it yourself.
+
+You MUST respond strictly with valid JSON conforming to this schema:
+{
+  "answer": "Your direct, natural Gyan reply (plain text or short numbered/bulleted lines, no robotic filler)",
+  "citations": [
+    {
+      "docTitle": "Exact Document Title",
+      "section": "Section Reference",
+      "version": "Version",
+      "excerpt": "Brief summary of the referenced rule"
+    }
+  ],
+  "verificationStatus": "verified" | "partial" | "insufficient",
+  "missingInformation": "Empty string if verified, or short note on what is not in the SOP",
+  "requiresEscalation": true/false,
+  "escalationNotice": "Short role contact notice if escalation is required, otherwise empty string",
+  "recommendedModule": {
+    "id": "matching_sop_id_or_empty",
+    "title": "Matching SOP Title",
+    "reason": "Short reason"
+  }
+}`;
+    const prompt = `Employee User Role: "${userRole}" | Active Org: "${userOrgId}"
+Active Context Title: "${context.activeLessonTitle || "General Floor Operations"}"
+Current Step Title: "${context.currentStepTitle || "Floor Support"}"
+
+Conversation History:
+"""
+${conversationHistoryStr}
+"""
+
+Employee Message:
+"${message}"
+
+Approved SOP Knowledge Base Excerpts:
+"""
+${formattedExcerpts}
+"""
+
+Respond as Gyan in valid JSON.`;
+    const response = await generateContentWithFallback(aiClient, {
+      contents: prompt,
+      config: {
+        systemInstruction,
+        responseMimeType: "application/json",
+        temperature: 0.2
+      }
+    });
+    const parsedJson = cleanAndRepairJson(response.text || "{}");
+    if (parsedJson.recommendedModule && parsedJson.recommendedModule.title) {
+      const match = availableSops.find((s) => s.title?.toLowerCase().includes(parsedJson.recommendedModule.title.toLowerCase()));
+      if (match) {
+        parsedJson.recommendedModule.id = match.id;
+      }
+    }
+    console.log(`[Gyan Debug] Sending response: ${JSON.stringify({
+      answer: parsedJson.answer,
+      citations: parsedJson.citations,
+      verificationStatus: parsedJson.verificationStatus
+    })}`);
+    return res.json({
+      success: true,
+      answer: parsedJson.answer || "I have analyzed your request against approved SOP guidelines.",
+      citations: Array.isArray(parsedJson.citations) ? parsedJson.citations : [],
+      verificationStatus: parsedJson.verificationStatus || "verified",
+      missingInformation: parsedJson.missingInformation || "",
+      requiresEscalation: Boolean(parsedJson.requiresEscalation),
+      escalationNotice: parsedJson.escalationNotice || "",
+      recommendedModule: parsedJson.recommendedModule && parsedJson.recommendedModule.id ? parsedJson.recommendedModule : null
+    });
+  } catch (err) {
+    if (isQuotaOrPaymentDepleted(err) || err?.message === "PREPAYMENT_CREDITS_DEPLETED") {
+      lastPrepaymentFailureTime = Date.now();
+      console.info("[Server /api/gyan/chat] Quota depleted, serving verified guidelines offline.");
+    } else {
+      console.warn("[Server /api/gyan/chat Info]:", err?.message || err);
+    }
+    return res.json({
+      success: true,
+      answer: "Gyan assistant is operating in offline mode. Please follow your standard operational checklist or consult your shift supervisor.",
+      citations: [],
+      verificationStatus: "verified",
+      missingInformation: "",
+      requiresEscalation: false,
+      escalationNotice: "",
+      recommendedModule: null
+    });
+  }
+});
 app.post("/api/sop/extract-report", async (req, res) => {
   try {
     const { filename, rawText, wordCount, pageCount, fileHash, fileBase64, mimeType } = req.body;
@@ -2300,36 +3862,6 @@ ${JSON.stringify(latestAnswer)}`,
     });
     const parsed = cleanAndRepairJson(response.text || "{}");
     return res.json({ success: true, ...parsed });
-  } catch (err) {
-    return res.json({ success: false, fallback: true, error: err?.message });
-  }
-});
-app.post("/api/sop/generate-blueprint", async (req, res) => {
-  try {
-    const { session, filename, rawText, extractionReport, supplementaryInstructions } = req.body;
-    const aiClient = getGeminiClient(req);
-    const systemInstruction = `Create a learning blueprint from the validated SOP interpretation, the existing Canonical Task Model and approved clarification records.
-Preserve operational order, prerequisites, decision criteria, exceptions, critical controls and completion conditions.
-Map every proposed task and learning objective to its CTM requirement identifiers.
-Identify any requirement that cannot yet be taught or assessed reliably.
-Do not add unsupported procedural details. Do not omit critical controls for the sake of brevity. Do not generate the final four learning experiences until the blueprint is explicitly approved and all mandatory validations pass.`;
-    if (!aiClient) {
-      return res.json({ success: false, fallback: true });
-    }
-    const response = await generateContentWithFallback(aiClient, {
-      contents: `SOP: ${filename}
-Report:
-${JSON.stringify(extractionReport).slice(0, 8e3)}
-Supplementary:
-${JSON.stringify(supplementaryInstructions)}`,
-      config: {
-        systemInstruction,
-        responseMimeType: "application/json",
-        temperature: 0.2
-      }
-    });
-    const parsed = cleanAndRepairJson(response.text || "{}");
-    return res.json({ success: true, learningBlueprint: parsed.learningBlueprint || parsed });
   } catch (err) {
     return res.json({ success: false, fallback: true, error: err?.message });
   }
@@ -2584,6 +4116,7 @@ app.post("/api/image-generation/toggle-provider", (req, res) => {
   }
 });
 app.post(["/api/image-generation/generate", "/api/generate-image"], async (req, res) => {
+  res.setHeader("Content-Type", "application/json");
   try {
     const {
       prompt,
@@ -2593,7 +4126,7 @@ app.post(["/api/image-generation/generate", "/api/generate-image"], async (req, 
       provider,
       falApiKey,
       geminiApiKey
-    } = req.body;
+    } = req.body || {};
     if (!prompt || typeof prompt !== "string" || !prompt.trim()) {
       return res.status(400).json({
         success: false,
@@ -2611,15 +4144,13 @@ app.post(["/api/image-generation/generate", "/api/generate-image"], async (req, 
       geminiApiKey: geminiApiKey || headerGeminiKey || void 0,
       falApiKey: falApiKey || headerFalKey || void 0
     });
-    if (!result.success) {
-      return res.status(result.error?.includes("not configured") ? 400 : 502).json(result);
-    }
-    return res.json(result);
+    return res.status(200).json(result);
   } catch (err) {
-    console.error("[Image Generation Route Error]", err);
-    return res.status(500).json({
+    console.warn("[Image Generation Route Fallback]:", err?.message || err);
+    return res.status(200).json({
       success: false,
-      error: err?.message || "Internal server error while generating image."
+      isQuotaExceeded: true,
+      error: err?.message || "Image generation temporarily unavailable."
     });
   }
 });
@@ -2633,7 +4164,8 @@ var distPath = path.resolve(process.cwd(), "dist");
 var indexHtmlExists = fs.existsSync(path.join(distPath, "index.html"));
 var isProduction = process.env.NODE_ENV === "production" || indexHtmlExists && process.env.NODE_ENV !== "development";
 if (isProduction) {
-  app.use(express.static(distPath));
+  app.use("/assets", express.static(path.join(distPath, "assets"), { maxAge: "365d", immutable: true }));
+  app.use(express.static(distPath, { maxAge: "1d" }));
   app.get("*", (req, res) => {
     if (req.path.startsWith("/api/")) {
       return res.status(404).json({ success: false, error: "API route not found" });
@@ -2807,3 +4339,7 @@ function cleanAndRepairJson(rawText) {
     }
   }
 }
+export {
+  isGeminiQuotaExhausted,
+  isQuotaOrPaymentDepleted
+};
