@@ -40,6 +40,7 @@ export function runDeckQualityGateTests(): { passed: boolean; testResults: any[]
     testName: 'Baseline Clean Deck Verification',
     passed: test1Passed,
     details: baselineReport.auditSummary,
+    defectCaught: !test1Passed ? baselineReport.qualityIssues.map(q => q.description).join(' | ') : undefined,
   });
 
   // TEST 2: Missing Required Action Must FAIL
@@ -248,7 +249,7 @@ export function runDeckQualityGateTests(): { passed: boolean; testResults: any[]
 
   // TEST 10: Detection of Stage-Step Number Conflation ("Stages 1 to 67" when deck has 7 stages) Must FAIL
   const deckStageConflation = cleanDeck.map((s, idx) =>
-    idx === 1 ? { ...s, title: 'Operational sequence: Stages 1 to 67' } : s
+    idx === 1 ? { ...s, title: 'Stages 1 to 67' } : s
   );
   const reportStageConflation = validateAdaptiveDeckAgainstSop(blueprint, deckStageConflation, rawDoc);
   const test10Passed =

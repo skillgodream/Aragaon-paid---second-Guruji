@@ -21,6 +21,8 @@ import {
   deriveSemanticConceptLabel,
   synthesizeEditorialMicroCopy,
   isBrokenOrRedundantTitle,
+  checkTitleIntegrity,
+  simpleTitleGenerator,
 } from '../utils/learnerCopySanitizer';
 
 export type AdaptiveVisualFormat =
@@ -78,6 +80,10 @@ export interface TeachingBlueprintUnit {
   unitIndex: number;
   stageTitle?: string;
   stageNumber?: number;
+  // Instructional Design Metadata
+  contentRole: 'procedure' | 'checklist' | 'rule' | 'decision' | 'safety' | 'kpi' | 'reference';
+  instructionalPurpose: 'demonstrate' | 'practice' | 'verify' | 'explain';
+  titleCandidate: string; // Pre-validated, intent-based title
   learningObjective: string;
   whatLearnerMustKnowOrDo: string;
   difficultyFactor: string;
@@ -932,24 +938,8 @@ function clusterStepsIntoOperationalStages(rawSteps: any[], sopTitle: string): O
 
   // Synthesize crisp, professional, domain-authentic stage titles
   const synthesizeStageTitle = (cluster: { title: string; steps: any[]; stepNums: number[] }, stageIndex: number): string => {
-    if (cluster.title && !cluster.title.includes('&') && cluster.title.length > 6 && !/operational execution/i.test(cluster.title)) {
-      return cluster.title;
-    }
-
-    const verbs = cluster.steps
-      .map((s) => s.action_verb || (s.task_title || s.instruction || '').split(' ')[0] || '')
-      .filter((v) => v.length > 2 && !/^(?:step|execute|perform|do)$/i.test(v));
-    const primaryVerb = verbs[0] || 'Execute';
-    const secondaryVerb = verbs[1] && verbs[1].toLowerCase() !== primaryVerb.toLowerCase() ? verbs[1] : '';
-
     const firstTitle = cluster.steps[0]?.task_title || cluster.steps[0]?.instruction || '';
-    const nounMatch = firstTitle.replace(/^(?:step\s*\d+[\s:\-]*|[a-z]+\s+)/i, '').split(/[,\.\—\-\:\(\)]/)[0]?.trim();
-    const cleanNoun = nounMatch && nounMatch.length <= 30 ? nounMatch : 'Workflow Procedure';
-
-    if (secondaryVerb) {
-      return `${primaryVerb} & ${secondaryVerb}: ${cleanNoun}`;
-    }
-    return `${primaryVerb} ${cleanNoun}`;
+    return simpleTitleGenerator(firstTitle, `Stage ${cluster.stepNums[0] || stageIndex + 1}`);
   };
 
   return rawClusters.map((b, idx) => {
@@ -1059,9 +1049,13 @@ export function buildTeachingBlueprint(lesson?: Lesson, plan?: SlidePlan): Teach
 
   // STAGE 1: Opening (Purpose, Consequence of Failure, Tools & Systems / Prerequisites) -> 'checklist'
   if (prereqs.length > 0 || tools.length > 0 || controls.length > 0 || safetyRules.length > 0 || rawSteps.length > 0) {
+    const title = 'Workstation Readiness';
     units.push({
       id: `tb-unit-${unitCounter}`,
       unitIndex: unitCounter++,
+      contentRole: 'checklist',
+      instructionalPurpose: 'verify',
+      titleCandidate: title,
       learningObjective: `Understand the operational purpose, consequences of failure, and verify workstation readiness for ${sopTitle}.`,
       whatLearnerMustKnowOrDo: `Confirm readiness of required tools/systems, baseline prerequisites, and operational purpose.`,
       difficultyFactor: 'Starting the task before verifying equipment, permissions, or workstation setup.',
@@ -1087,9 +1081,13 @@ export function buildTeachingBlueprint(lesson?: Lesson, plan?: SlidePlan): Teach
   // STAGE 2: End-to-End Process (Complete sequence from start to finish) -> 'process_flow'
   if (rawSteps.length > 0) {
     const stepNums = rawSteps.map((_, idx) => idx + 1);
+    const title = 'Operational Process Flow';
     units.push({
       id: `tb-unit-${unitCounter}`,
       unitIndex: unitCounter++,
+      contentRole: 'procedure',
+      instructionalPurpose: 'demonstrate',
+      titleCandidate: title,
       learningObjective: `Master the complete ${rawSteps.length}-phase operational sequence in exact order.`,
       whatLearnerMustKnowOrDo: rawSteps
         .slice(0, 8)
@@ -1151,6 +1149,9 @@ export function buildTeachingBlueprint(lesson?: Lesson, plan?: SlidePlan): Teach
       units.push({
         id: `tb-unit-${unitCounter}`,
         unitIndex: unitCounter++,
+        contentRole: 'procedure',
+        instructionalPurpose: 'demonstrate',
+        titleCandidate: stage.stageTitle,
         stageTitle: stage.stageTitle,
         stageNumber: stage.stageNum,
         learningObjective: `Execute Stage ${stage.stageNum} (${stage.stageTitle}): ${group.map((s: any) => s.task_title || s.action_verb || 'Standard Task').join(' · ')}.`,
@@ -1728,8 +1729,8 @@ export function buildAdaptiveDeckFromBlueprint(
       const totalStagesLabel = stageCount > 0 ? stageCount : stepNums.length;
       const titleText =
         stageCount > 0
-          ? `Operational sequence: ${stageCount} teaching stages (${blueprint.totalSourceSteps} source steps)`
-          : `Complete ${blueprint.totalSourceSteps}-step operational sequence`;
+          ? `Teaching Stages: ${stageCount}`
+          : `Operational Procedure`;
 
       slides.push({
         num: slideNum,
@@ -2551,17 +2552,19 @@ export function validateAdaptiveDeckAgainstSop(
 
   let hasCorruptedTitles = false;
   for (const slide of slides) {
+    const integrity = checkTitleIntegrity(slide.title, slide.subtitle || '');
     if (
       DANGLING_TITLE_REGEX.test(slide.title) ||
       UNPARSED_HEADER_REGEX.test(slide.title) ||
-      STRAY_NUMBERING_REGEX.test(slide.title)
+      STRAY_NUMBERING_REGEX.test(slide.title) ||
+      !integrity.isValid
     ) {
       hasCorruptedTitles = true;
       qualityIssues.push({
         type: 'CORRUPTED_TITLE',
         severity: 'BLOCKING',
         slideNum: slide.num,
-        description: `Corrupted or truncated slide title detected on slide ${slide.num}: "${slide.title}".`,
+        description: `Corrupted or truncated slide title detected on slide ${slide.num}: "${slide.title}". ${integrity.reason || ''}`,
       });
     }
   }

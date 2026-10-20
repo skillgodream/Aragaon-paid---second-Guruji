@@ -456,3 +456,29 @@ export function sanitizeSlideCardCopy<T extends {
     consequence: cleanConsequence || undefined,
   };
 }
+
+/**
+ * Detects bloated or malformed titles in deck construction.
+ */
+export function checkTitleIntegrity(title: string, body: string): { isValid: boolean; reason?: string } {
+  const words = title.split(/\s+/).length;
+  if (words > 10) return { isValid: false, reason: 'Title is too long (>10 words).' };
+  if (title.includes('·')) {
+    return { isValid: false, reason: 'Title contains prohibited delimiters.' };
+  }
+  // Only flag if title is > 50% of body text to avoid false positives on list headings
+  if (body.length > 0 && title.length / body.length > 0.5) {
+      if (body.toLowerCase().includes(title.toLowerCase())) {
+        return { isValid: false, reason: 'Title repeats content from the body.' };
+      }
+  }
+  return { isValid: true };
+}
+
+/**
+ * Derives a clean, short title.
+ */
+export function simpleTitleGenerator(text: string, fallback: string): string {
+  const label = deriveSemanticConceptLabel(text, fallback);
+  return label.length > 30 ? label.slice(0, 27) + '...' : label;
+}

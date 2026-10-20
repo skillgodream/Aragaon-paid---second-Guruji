@@ -773,7 +773,14 @@ export const ExperiencePlayer: React.FC<{
 
   const cleanSopTitle = useMemo(() => {
     let title = sanitizeLearnerText(blueprint.sopTitle);
-    title = title.replace(/\.(txt|pdf|docx)$/i, '').replace(/_sop_test$/i, '').replace(/_test$/i, '').replace(/_+/g, ' ').replace(/\s*[-–—]\s*/g, ' — ').replace(/\s{2,}/g, ' ').trim();
+    title = title.replace(/\.(txt|pdf|docx)$/i, '')
+                 .replace(/_sop_test$/i, '')
+                 .replace(/_test$/i, '')
+                 .replace(/\|\s*Version\s*\d+/i, '')
+                 .replace(/_+/g, ' ')
+                 .replace(/\s*[-–—]\s*/g, ' — ')
+                 .replace(/\s{2,}/g, ' ')
+                 .trim();
     return title;
   }, [blueprint.sopTitle]);
 
