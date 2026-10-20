@@ -357,33 +357,11 @@ export default function App() {
         console.warn('[SOP Pipeline] Server LLM blueprint error or timeout:', err?.message || err);
       }
 
-      // Secondary Fallback via /api/coach (only if local generator was not explicitly requested)
-      if (!opBlueprint && !shouldUseLocal) {
-        try {
-          console.log('[SOP Pipeline] Trying secondary endpoint /api/coach for blueprint generation...');
-          const coachController = new AbortController();
-          const coachTimeout = setTimeout(() => coachController.abort(), 60000);
-          const coachRes = await fetch('/api/coach', {
-            method: 'POST',
-            headers: getApiHeaders(),
-            body: JSON.stringify({
-              prompt: `Transform this SOP ("${extractedDoc.filename}") into a high-fidelity OPERATIONAL BLUEPRINT. For EACH operational step, generate a realistic workplace scenario question, 3 nuanced choices with compliant rationale and realistic failure modes (subtitle), pro coach tip, and hint. Return JSON with document_identity, role, process, purpose, scope, operational_steps (instruction, category, why_it_matters, scenario_question, task_title, target_code, choices: [{id, title, subtitle, isCorrect}], coach_tip, hint, critical_control, source), decision_points, critical_controls, safety_rules, tools_and_systems, terminology. Document text:\n"""\n${extractedDoc.rawText.slice(0, 32000)}\n"""`,
-              systemInstruction: 'You are an expert instructional designer and workplace assessment engineer. Generate deep, authentic frontline questions grounded strictly in the SOP with realistic failure distractors. Respond strictly with valid JSON.',
-              maxOutputTokens: 6000,
-            }),
-            signal: coachController.signal,
-          });
-          clearTimeout(coachTimeout);
-          if (coachRes.ok) {
-            const coachData = await coachRes.json().catch(() => ({}));
-            if (coachData.operational_steps) {
-              console.log('[SOP Pipeline SUCCESS via /api/coach] Generated Operational Blueprint');
-              opBlueprint = coachData;
-            }
-          }
-        } catch (coachErr: any) {
-          console.warn('[SOP Pipeline] /api/coach fallback error or timeout:', coachErr?.message || coachErr);
-        }
+      // If server returned a valid blueprint (either from remote cascade or local engine), use it
+      if (opBlueprint && opBlueprint.operational_steps) {
+        console.log('[SOP Pipeline] Operational Blueprint verified with', opBlueprint.operational_steps.length, 'tasks');
+      } else {
+        console.log('[SOP Pipeline] Using client deterministic engine for lesson generation');
       }
 
       // 4. DOMAIN-NEUTRAL BLUEPRINT & LESSON GENERATION

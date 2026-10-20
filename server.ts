@@ -493,8 +493,8 @@ Do NOT summarize. Return JSON:
   }
 });
 
-// API Route: Generate Blueprint & Lesson from SOP Source Document
-app.post('/api/gemini/generate-blueprint', async (req, res) => {
+// Unified Production Operational Blueprint Generation Handler
+async function handleOperationalBlueprintGeneration(req: express.Request, res: express.Response) {
   try {
     const { rawText, fileBase64, mimeType, filename, fileHash, pageCount, wordCount } = req.body;
 
@@ -505,9 +505,9 @@ app.post('/api/gemini/generate-blueprint', async (req, res) => {
     if (!aiClient || isCooldownActive) {
       if (isCooldownActive) {
         const rem = Math.ceil((PREPAYMENT_COOLDOWN_MS - (Date.now() - lastPrepaymentFailureTime)) / 1000);
-        console.info(`[Server /api/gemini/generate-blueprint] Prepayment cooldown active (${rem}s). Fast-pathing to Layer 5 (Guruji local engine).`);
+        console.info(`[Server Blueprint Engine] Prepayment cooldown active (${rem}s). Engaging Layer 5 (Guruji local engine).`);
       } else {
-        console.info('[Server /api/gemini/generate-blueprint] No remote API key found. Engaging Layer 5 (Guruji local engine).');
+        console.info('[Server Blueprint Engine] No remote API key found. Engaging Layer 5 (Guruji local engine).');
       }
       const extractedDoc = buildServerExtractedDoc(req.body);
       const km = buildSopKnowledgeModel(extractedDoc);
@@ -520,6 +520,7 @@ app.post('/api/gemini/generate-blueprint', async (req, res) => {
       return res.json({
         success: true,
         blueprint: localBlueprint,
+        learningBlueprint: localBlueprint,
         engine: 'local_deterministic',
         layer: 5,
       });
@@ -737,17 +738,20 @@ The number of operational_steps must emerge naturally from the SOP's actual oper
       console.warn('[Server Veo VideoPlan synthesis warning]:', vpErr);
     }
 
-    console.log(`[Server /api/gemini/generate-blueprint SUCCESS] Extracted ${parsedData.operational_steps?.length || 0} high-fidelity steps from '${filename}'`);
+    console.log(`[Server Blueprint Engine SUCCESS] Extracted ${parsedData.operational_steps?.length || 0} high-fidelity steps from '${filename}'`);
 
     return res.json({
       success: true,
       blueprint: parsedData,
+      learningBlueprint: parsedData,
+      engine: 'remote_llm',
+      layer: 1,
     });
   } catch (err: any) {
     if (isQuotaOrPaymentDepleted(err) || err?.message === 'PREPAYMENT_CREDITS_DEPLETED') {
       lastPrepaymentFailureTime = Date.now();
     }
-    console.info(`[Server /api/gemini/generate-blueprint] Remote cascade completed. Activating Layer 5 (Guruji local engine)...`);
+    console.info(`[Server Blueprint Engine] Remote cascade completed. Activating Layer 5 (Guruji local engine)...`);
     try {
       const extractedDoc = buildServerExtractedDoc(req.body);
       const km = buildSopKnowledgeModel(extractedDoc);
@@ -760,11 +764,12 @@ The number of operational_steps must emerge naturally from the SOP's actual oper
       return res.json({
         success: true,
         blueprint: localBlueprint,
+        learningBlueprint: localBlueprint,
         engine: 'local_deterministic',
         layer: 5,
       });
     } catch (localErr: any) {
-      console.warn('[Server /api/gemini/generate-blueprint] Local engine fallback note:', localErr?.message);
+      console.warn('[Server Blueprint Engine] Local engine fallback note:', localErr?.message);
       return res.json({
         success: false,
         useLocalGenerator: true,
@@ -772,7 +777,11 @@ The number of operational_steps must emerge naturally from the SOP's actual oper
       });
     }
   }
-});
+}
+
+// Single Canonical Production Blueprint Endpoint + Alias Proxy
+app.post('/api/gemini/generate-blueprint', handleOperationalBlueprintGeneration);
+app.post('/api/sop/generate-blueprint', handleOperationalBlueprintGeneration);
 
 // Generic /api/coach endpoint implementing developer guide specification
 app.post('/api/coach', async (req, res) => {
@@ -1668,37 +1677,7 @@ Return the next question, its reason, supporting references, answer options wher
   }
 });
 
-// Stage D: Prompt C — Learning Blueprint Generation
-app.post('/api/sop/generate-blueprint', async (req, res) => {
-  try {
-    const { session, filename, rawText, extractionReport, supplementaryInstructions } = req.body;
-    const aiClient = getGeminiClient(req);
-
-    const systemInstruction = `Create a learning blueprint from the validated SOP interpretation, the existing Canonical Task Model and approved clarification records.
-Preserve operational order, prerequisites, decision criteria, exceptions, critical controls and completion conditions.
-Map every proposed task and learning objective to its CTM requirement identifiers.
-Identify any requirement that cannot yet be taught or assessed reliably.
-Do not add unsupported procedural details. Do not omit critical controls for the sake of brevity. Do not generate the final four learning experiences until the blueprint is explicitly approved and all mandatory validations pass.`;
-
-    if (!aiClient) {
-      return res.json({ success: false, fallback: true });
-    }
-
-    const response = await generateContentWithFallback(aiClient, {
-      contents: `SOP: ${filename}\nReport:\n${JSON.stringify(extractionReport).slice(0, 8000)}\nSupplementary:\n${JSON.stringify(supplementaryInstructions)}`,
-      config: {
-        systemInstruction,
-        responseMimeType: 'application/json',
-        temperature: 0.2,
-      },
-    });
-
-    const parsed = cleanAndRepairJson(response.text || '{}');
-    return res.json({ success: true, learningBlueprint: parsed.learningBlueprint || parsed });
-  } catch (err: any) {
-    return res.json({ success: false, fallback: true, error: err?.message });
-  }
-});
+// (Stage D learning blueprint route is unified with handleOperationalBlueprintGeneration above)
 
 // Stage Transition & Approval Enforcement
 app.post('/api/sop/approve-and-generate', async (req, res) => {
