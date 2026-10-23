@@ -10,7 +10,7 @@ import { evaluateCapabilityDecision } from '../utils/capabilityDecisionEngine';
 import { sounds } from '../utils/audio';
 import { ORG_CONFIG } from '../config/orgConfig';
 import { findBestVisualMatch, requestAiSopImage, getCachedAiSopImage } from '../utils/visualLibraryMatcher';
-import './guruji-work-coach.css';
+import './athena-work-coach.css';
 
 interface SimulatorScreenProps {
   initialPhase?: number; // 0: Show me (WATCH), 1: Guide me (YOUR TURN), 2: Test me (SOLO CHECK)
@@ -510,7 +510,7 @@ export default function SimulatorScreen({
         <div className="guruji-coach-app">
           {/* Header */}
           <header className="header">
-            <div className="brand">GURUJI · WORK COACH</div>
+            <div className="brand">ATHENA · WORK COACH</div>
             <div className="live">
               <i></i>RESULT
             </div>
@@ -636,8 +636,8 @@ export default function SimulatorScreen({
     (phase === 2 && selectedChoiceId === null);
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#1b1b1c] overflow-y-auto guruji-coach-wrapper">
-      <div className="guruji-coach-app">
+    <div className="fixed inset-0 z-50 bg-[#1b1b1c] overflow-y-auto athena-coach-wrapper">
+      <div className="athena-coach-app">
         <div className="screen work">
           {/* Header */}
           <header className="header">
@@ -806,11 +806,11 @@ export default function SimulatorScreen({
               </div>
             )}
 
-            {/* Guruji Coaching Bubble */}
+            {/* Athena Coaching Bubble */}
             <div className="guru" id="guru">
-              <div className="gMark">G</div>
+              <div className="gMark">A</div>
               <div className={`gBubble ${isBubbleBad ? 'bad' : ''}`}>
-                <b>GURUJI</b>
+                <b>ATHENA</b>
                 <span>{coachSpeech}</span>
               </div>
             </div>

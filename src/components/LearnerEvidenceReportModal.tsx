@@ -18,7 +18,7 @@ export default function LearnerEvidenceReportModal({
 }: LearnerEvidenceReportModalProps) {
   if (!isOpen || !learner) return null;
 
-  const isGurujiReady = learner.gurujiReadiness === 'ready_for_supervised_practice';
+  const isAthenaReady = learner.athenaReadiness === 'ready_for_supervised_practice';
   const isWorkplacePassed = learner.workplaceReadiness === 'workplace_demonstration_passed';
 
   const latestAttempt = learner.attempts[learner.attempts.length - 1];
@@ -57,15 +57,15 @@ export default function LearnerEvidenceReportModal({
 
         {/* Both Readiness States Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-left">
-          {/* State 1: Guruji Learning Readiness */}
+          {/* State 1: Athena Learning Readiness */}
           <div className={`p-4 rounded-2xl border space-y-1.5 ${
             isGurujiReady ? 'bg-emerald-950/40 border-emerald-500/30' : 'bg-amber-950/40 border-amber-500/30'
           }`}>
             <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-400">
-              1. Guruji Learning Readiness
+              1. Athena Learning Readiness
             </div>
             <div className="flex items-center gap-1.5 font-black text-xs text-white">
-              {isGurujiReady ? (
+              {isAthenaReady ? (
                 <>
                   <ShieldCheck size={16} className="text-emerald-400" /> Ready for Supervised Practice
                 </>
@@ -76,7 +76,7 @@ export default function LearnerEvidenceReportModal({
               )}
             </div>
             <p className="text-[11px] text-slate-300 leading-snug">
-              {isGurujiReady
+              {isAthenaReady
                 ? 'Demonstrated simulated decision accuracy & safety gates.'
                 : 'Failed critical controls or step decisions. Re-test needed.'}
             </p>

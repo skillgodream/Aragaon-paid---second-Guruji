@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { MeetGurujiScreen } from './screens/MeetGurujiScreen';
+import { MeetAthenaScreen } from './screens/MeetAthenaScreen';
 import { ProcessPassport, PerceiveObservation, TabType, Lesson, ExperienceLevel } from './types';
 import { sounds } from './utils/audio';
 import type { ExtractedDocument } from './utils/documentExtractor';
@@ -86,17 +86,17 @@ export default function App() {
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [showBentoShowcase, setShowBentoShowcase] = useState<boolean>(false);
   const [isSopOptionsOpen, setIsSopOptionsOpen] = useState<boolean>(false);
-  const [showGurujiHome, setShowGurujiHome] = useState<boolean>(true);
+  const [showAthenaHome, setShowAthenaHome] = useState<boolean>(true);
 
   // Role & Permissions State: Learner · Manager · Admin (ID locking ready)
   const [currentUserRole, setCurrentUserRole] = useState<UserRole>(() => {
-    return (localStorage.getItem('guruji_user_role') as UserRole) || 'learn';
+    return (localStorage.getItem('athena_user_role') as UserRole) || 'learn';
   });
   // If user clicked the instant HTML shell before React mounted, open Role Modal immediately
   const [isRoleModalOpen, setIsRoleModalOpen] = useState<boolean>(() => {
-    const clickedEarly = Boolean((window as any).__gurujiExploreClicked);
+    const clickedEarly = Boolean((window as any).__athenaExploreClicked);
     if (clickedEarly) {
-      (window as any).__gurujiExploreClicked = false;
+      (window as any).__athenaExploreClicked = false;
     }
     return clickedEarly;
   });
@@ -169,9 +169,9 @@ export default function App() {
 
     // 3. Local Cache Fallback
     try {
-      const cached = JSON.parse(localStorage.getItem('guruji_sop_repository') || '[]');
+      const cached = JSON.parse(localStorage.getItem('athena_sop_repository') || '[]');
       const updated = [lesson, ...cached.filter((l: any) => l.id !== lesson.id)];
-      localStorage.setItem('guruji_sop_repository', JSON.stringify(updated));
+      localStorage.setItem('athena_sop_repository', JSON.stringify(updated));
     } catch (e) {
       // ignore
     }
@@ -207,7 +207,7 @@ export default function App() {
       } catch (err) {
         // fallback to localStorage
         try {
-          const cached = JSON.parse(localStorage.getItem('guruji_sop_repository') || '[]');
+          const cached = JSON.parse(localStorage.getItem('athena_sop_repository') || '[]');
           if (!cancelled && Array.isArray(cached) && cached.length > 0) {
             setLessons((prev) => {
               const incomingIds = new Set(cached.map((s: any) => s.id));
@@ -577,9 +577,9 @@ export default function App() {
     <>
       {activeTab === 'home' && (
         <main className="flex-1 flex flex-col w-full animate-in fade-in duration-200">
-          {showGurujiHome ? (
+          {showAthenaHome ? (
             <div className="max-w-lg mx-auto w-full">
-              <MeetGurujiScreen
+              <MeetAthenaScreen
                 onContinue={() => {
                   sounds.playTap();
                   setIsRoleModalOpen(true);
@@ -820,7 +820,7 @@ export default function App() {
                     onBackToHome={() => {
                       sounds.playTap();
                       setCurrentUserRole('learn');
-                      localStorage.setItem('guruji_user_role', 'learn');
+                      localStorage.setItem('athena_user_role', 'learn');
                       setActiveTab('home');
                     }}
                   />
@@ -874,7 +874,7 @@ export default function App() {
               onClick={() => {
                 sounds.playTap();
                 setActiveTab('home');
-                setShowGurujiHome(true);
+                setShowAthenaHome(true);
               }}
               className="fixed top-4 left-4 z-40 p-2 rounded-full bg-slate-900/50 backdrop-blur-md text-white border border-white/10"
             >
@@ -892,7 +892,7 @@ export default function App() {
                 onSelectTab={(tab) => {
                   sounds.playTap();
                   setActiveTab(tab);
-                  setShowGurujiHome(tab === 'home');
+                  setShowAthenaHome(tab === 'home');
                 }}
                 role={currentUserRole}
                 onOpenRoleSwitcher={() => setIsRoleModalOpen(true)}

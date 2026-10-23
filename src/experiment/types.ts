@@ -8,7 +8,52 @@ export type SlideType =
   | 'REAL_WORLD_SCENARIO'
   | 'DECISION'
   | 'KEY_TAKEAWAYS'
-  | 'COMPLETION';
+  | 'COMPLETION'
+  | 'FEYNMAN_CARD';
+
+export type FeynmanCardType =
+  | 'concept_analogy'
+  | 'critical_rules'
+  | 'process_steps'
+  | 'pitfalls_troubleshooting'
+  | 'scenario_quiz'
+  | 'quick_reference';
+
+export interface FeynmanCardMetadata {
+  cardType: FeynmanCardType;
+  feynmanExplanation: string;
+  badgeText?: string;
+  analogy?: {
+    metaphor: string;
+    takeaway: string;
+  };
+  criticalRules?: {
+    type: 'must_do' | 'never_do' | 'warning';
+    rule: string;
+    consequenceOfFailure: string;
+    verificationCheck: string;
+  }[];
+  steps?: {
+    stepNumber: number;
+    title: string;
+    action: string;
+    whyItMatters: string;
+    criticalWatchout?: string;
+  }[];
+  pitfalls?: {
+    symptomOrMistake: string;
+    rootCause: string;
+    immediateFix: string;
+  }[];
+  quiz?: {
+    scenario: string;
+    question: string;
+    options: string[];
+    correctAnswerIndex: number;
+    feynmanFeedback: string;
+    distractorExplanations: string[];
+  };
+}
 
 export interface GurujiCoaching {
   explanation: string;
@@ -61,6 +106,7 @@ export interface Slide {
   evidenceSource?: string;
   visualFormat?: string;
   teachingMethod?: string;
+  feynmanMetadata?: FeynmanCardMetadata;
 }
 
 export interface TeachMePlan {

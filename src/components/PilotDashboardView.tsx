@@ -88,7 +88,7 @@ export default function PilotDashboardView({ onBackToHome, onSelectLearnerSop }:
         <div>
           <div className="flex items-center gap-2">
             <span className="px-2.5 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[10px] uppercase font-mono font-bold tracking-wider">
-              Guruji Pilot Evidence Engine
+              Athena Pilot Evidence Engine
             </span>
             <span className="text-xs text-slate-400 font-medium">Workplace Readiness Validation</span>
           </div>
@@ -354,7 +354,7 @@ export default function PilotDashboardView({ onBackToHome, onSelectLearnerSop }:
         {/* Metric 2 */}
         <div className="p-4 bg-[#0F1322] border border-white/10 rounded-2xl space-y-1 shadow-lg">
           <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
-            <ShieldCheck size={12} className="text-emerald-400" /> Guruji Ready
+            <ShieldCheck size={12} className="text-emerald-400" /> Athena Ready
           </div>
           <div className="text-2xl font-black text-emerald-400">{scorecard.completedCount}</div>
           <div className="text-[11px] text-slate-400">{scorecard.remediationOutstandingCount} Needs Remediation</div>
@@ -387,7 +387,7 @@ export default function PilotDashboardView({ onBackToHome, onSelectLearnerSop }:
               <Users size={18} className="text-indigo-400" /> Frontline Learner Pilot Roster
             </h2>
             <p className="text-xs text-slate-400">
-              Tracking journey progress, Guruji learning readiness, and supervisor workplace sign-offs.
+              Tracking journey progress, Athena learning readiness, and supervisor workplace sign-offs.
             </p>
           </div>
 
@@ -411,14 +411,14 @@ export default function PilotDashboardView({ onBackToHome, onSelectLearnerSop }:
                 <th className="py-2.5 px-3">Learner & Role</th>
                 <th className="py-2.5 px-3">Assigned SOP</th>
                 <th className="py-2.5 px-3">4-Stage Progress</th>
-                <th className="py-2.5 px-3">Guruji Readiness</th>
+                <th className="py-2.5 px-3">Athena Readiness</th>
                 <th className="py-2.5 px-3">Workplace Readiness</th>
                 <th className="py-2.5 px-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
               {filteredLearners.map((learner) => {
-                const isReady = learner.gurujiReadiness === 'ready_for_supervised_practice';
+                const isReady = learner.athenaReadiness === 'ready_for_supervised_practice';
                 const isCertified = learner.workplaceReadiness === 'workplace_demonstration_passed';
 
                 return (
@@ -456,7 +456,7 @@ export default function PilotDashboardView({ onBackToHome, onSelectLearnerSop }:
                       </div>
                     </td>
 
-                    {/* Guruji Readiness */}
+                    {/* Athena Readiness */}
                     <td className="py-3 px-3">
                       <span
                         className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${

@@ -1,3 +1,4 @@
+
 /**
  * LEARNER COPY SANITIZER & EDITORIAL COPY FIREWALL
  *
@@ -322,24 +323,30 @@ export function synthesizeEditorialMicroCopy(
   const cleanVal = sanitizeLearnerText(rawValue);
   const cleanSub = sanitizeLearnerText(rawSubtext);
 
+  // Helper to elevate tone
+  const elevateTone = (text: string) => {
+    return text.replace(/\b(make sure to|try to|it is good to|please)\b/gi, '')
+               .replace(/\b(check|verify)\b/gi, 'Confirm')
+               .replace(/\b(do not|don't)\b/gi, 'Strictly avoid')
+               .replace(/^\s+/, '');
+  };
+
   // Case 1: Both cleanVal and cleanSub exist and are distinct
   if (cleanVal && cleanSub && !isDuplicateLearnerCopy(cleanVal, cleanSub)) {
-    // Check if cleanVal is a clean short title (<= 6 words) and not broken
     const valWords = cleanVal.split(/\s+/);
     if (valWords.length <= 6 && !isBrokenOrRedundantTitle(cleanVal, cleanSub)) {
       return {
         title: cleanVal.replace(/[.]+$/, ''),
-        body: cleanSub.endsWith('.') ? cleanSub : `${cleanSub}.`,
+        body: elevateTone(cleanSub.endsWith('.') ? cleanSub : `${cleanSub}.`),
       };
     }
-    // Otherwise derive a semantic concept title for the combined statement
     const semanticTitle =
       cleanLabel && !/^Step \d+|^Action \d+|^Rule$|^Prep$|^Tool$/i.test(cleanLabel) && !isBrokenOrRedundantTitle(cleanLabel, cleanVal)
         ? cleanLabel.replace(/[.]+$/, '')
         : deriveSemanticConceptLabel(cleanVal, fallbackCategory);
     return {
       title: semanticTitle,
-      body: `${cleanVal.replace(/[.]+$/, '')}. ${cleanSub.endsWith('.') ? cleanSub : `${cleanSub}.`}`,
+      body: elevateTone(`${cleanVal.replace(/[.]+$/, '')}. ${cleanSub.endsWith('.') ? cleanSub : `${cleanSub}.`}`),
     };
   }
 
@@ -349,7 +356,7 @@ export function synthesizeEditorialMicroCopy(
     return { title: fallbackCategory, body: '' };
   }
 
-  // Check if primaryText has an inline "Label: Body" colon split
+  // ... (Keep existing colonMatch logic)
   const colonMatch = primaryText.match(/^([A-Za-z0-9\s/&()-]{3,34}?)\s*[:—–]\s+(.+)$/);
   if (colonMatch) {
     const prefixTitle = colonMatch[1].trim();
@@ -357,12 +364,11 @@ export function synthesizeEditorialMicroCopy(
     if (!isBrokenOrRedundantTitle(prefixTitle, restBody)) {
       return {
         title: prefixTitle.charAt(0).toUpperCase() + prefixTitle.slice(1),
-        body: restBody.endsWith('.') ? restBody : `${restBody}.`,
+        body: elevateTone(restBody.endsWith('.') ? restBody : `${restBody}.`),
       };
     }
   }
 
-  // Check if cleanLabel is already a valid, non-redundant title for primaryText
   if (
     cleanLabel &&
     !/^(?:Step|Stage|Action|Rule|Prep|Tool|Standard|Key Term)\s*\d*$/i.test(cleanLabel) &&
@@ -371,15 +377,12 @@ export function synthesizeEditorialMicroCopy(
   ) {
     return {
       title: cleanLabel.replace(/[.]+$/, ''),
-      body: primaryText.endsWith('.') ? primaryText : `${primaryText}.`,
+      body: elevateTone(primaryText.endsWith('.') ? primaryText : `${primaryText}.`),
     };
   }
 
-  // Derive a semantic concept title so the heading and body never stutter
   const conceptTitle = deriveSemanticConceptLabel(primaryText, fallbackCategory);
-
-  // If primaryText is a short noun phrase (e.g., "Working key encoder and blank key cards"),
-  // turn the body into a complete operational verification sentence so it reads naturally.
+  
   const wordCount = primaryText.split(/\s+/).length;
   let finalBody = primaryText.endsWith('.') ? primaryText : `${primaryText}.`;
 
@@ -390,7 +393,7 @@ export function synthesizeEditorialMicroCopy(
 
   return {
     title: conceptTitle,
-    body: finalBody,
+    body: elevateTone(finalBody),
   };
 }
 

@@ -1,12 +1,12 @@
 import React from 'react';
 
-const gurujiImg = "/Monochrome Guruji App Showcase.png";
+const athenaImg = "/Monochrome Athena App Showcase.png";
 
-interface MeetGurujiScreenProps {
+interface MeetAthenaScreenProps {
   onContinue: () => void;
 }
 
-export const MeetGurujiScreen: React.FC<MeetGurujiScreenProps> = ({ onContinue }) => {
+export const MeetAthenaScreen: React.FC<MeetAthenaScreenProps> = ({ onContinue }) => {
   return (
     <div 
       className="relative w-full min-h-[100dvh] sm:min-h-[780px] bg-black text-white overflow-hidden flex flex-col justify-between p-4 sm:p-6 select-none cursor-pointer"
@@ -23,14 +23,14 @@ export const MeetGurujiScreen: React.FC<MeetGurujiScreenProps> = ({ onContinue }
         <div className="relative w-80 h-80 sm:w-[400px] sm:h-[400px] flex items-center justify-center">
           <div className="relative z-10 w-full h-full flex items-center justify-center transition-transform duration-700">
             <img
-              src={gurujiImg}
-              alt="Coach Guruji Presentation"
+              src={athenaImg}
+              alt="Coach Athena Presentation"
               referrerPolicy="no-referrer"
               fetchPriority="high"
               decoding="sync"
               className="w-full h-full object-contain"
               onError={(e) => {
-                (e.target as HTMLImageElement).src = gurujiImg;
+                (e.target as HTMLImageElement).src = athenaImg;
               }}
             />
           </div>
@@ -42,7 +42,7 @@ export const MeetGurujiScreen: React.FC<MeetGurujiScreenProps> = ({ onContinue }
         {/* Headline & Subtitle */}
         <div className="space-y-1">
           <h1 className="text-4xl sm:text-5xl font-black text-white tracking-tight leading-none">
-            Guruji
+            Athena
           </h1>
           <p className="text-[13px] text-slate-400 font-normal leading-relaxed max-w-[290px] sm:max-w-[320px] mx-auto pt-1">
             Frontline Coach

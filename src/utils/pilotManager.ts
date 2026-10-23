@@ -5,7 +5,7 @@
  * 1. Assign SOP to learner
  * 2. Record journey progress across Learn, See, Guide, and Prove
  * 3. Track assessment attempts, failed requirements, and targeted remediation
- * 4. Separate Guruji Learning Readiness from Workplace Readiness
+ * 4. Separate Athena Learning Readiness from Workplace Readiness
  * 5. Record Supervisor Observation & Workplace Sign-off
  * 6. Aggregate Pilot Evidence Dashboard metrics & recurring gap analysis
  */
@@ -13,7 +13,7 @@
 import { ExperienceLevel } from '../types';
 import { saveLearnerToFirestore, saveAssignmentToFirestore, logAuditEvent } from '../services/firestorePersistence';
 
-export type GurujiReadinessState =
+export type AthenaReadinessState =
   | 'ready_for_supervised_practice'
   | 'targeted_remediation_required'
   | 'source_policy_review_required';
@@ -89,7 +89,7 @@ export interface PilotLearner {
     proveCompleted: boolean;
   };
   attempts: AssessmentAttempt[];
-  gurujiReadiness: GurujiReadinessState;
+  athenaReadiness: AthenaReadinessState;
   workplaceReadiness: WorkplaceReadinessState;
   supervisorObservation?: SupervisorObservationRecord;
   timeSpentSeconds: number;
@@ -164,7 +164,7 @@ export interface PilotScorecard {
   goNoGoDecision: GoNoGoDecision;
 }
 
-const LOCAL_STORAGE_KEY = 'guruji_pilot_learners_v2';
+const LOCAL_STORAGE_KEY = 'athena_pilot_learners_v2';
 
 // Seed Initial Representative Frontline Learner Data across domains
 export const SEED_LEARNERS: PilotLearner[] = [
@@ -199,7 +199,7 @@ export const SEED_LEARNERS: PilotLearner[] = [
         timestamp: '2026-10-10T08:25:00Z',
       },
     ],
-    gurujiReadiness: 'ready_for_supervised_practice',
+    athenaReadiness: 'ready_for_supervised_practice',
     workplaceReadiness: 'workplace_demonstration_passed',
     supervisorObservation: {
       supervisorName: 'Marcus Vance (Ops Lead)',
@@ -250,7 +250,7 @@ export const SEED_LEARNERS: PilotLearner[] = [
         timestamp: '2026-10-10T09:10:00Z',
       },
     ],
-    gurujiReadiness: 'ready_for_supervised_practice',
+    athenaReadiness: 'ready_for_supervised_practice',
     workplaceReadiness: 'workplace_demonstration_passed',
     supervisorObservation: {
       supervisorName: 'Marcus Vance (Ops Lead)',
@@ -298,7 +298,7 @@ export const SEED_LEARNERS: PilotLearner[] = [
         timestamp: '2026-10-11T08:35:00Z',
       },
     ],
-    gurujiReadiness: 'ready_for_supervised_practice',
+    athenaReadiness: 'ready_for_supervised_practice',
     workplaceReadiness: 'pending_supervisor_observation',
     timeSpentSeconds: 310,
     remediationCompleted: true,
@@ -348,7 +348,7 @@ export const SEED_LEARNERS: PilotLearner[] = [
         timestamp: '2026-10-11T09:25:00Z',
       },
     ],
-    gurujiReadiness: 'ready_for_supervised_practice',
+    athenaReadiness: 'ready_for_supervised_practice',
     workplaceReadiness: 'pending_supervisor_observation',
     timeSpentSeconds: 380,
     remediationCompleted: true,
@@ -388,7 +388,7 @@ export const SEED_LEARNERS: PilotLearner[] = [
         timestamp: '2026-10-10T08:15:00Z',
       },
     ],
-    gurujiReadiness: 'ready_for_supervised_practice',
+    athenaReadiness: 'ready_for_supervised_practice',
     workplaceReadiness: 'workplace_demonstration_passed',
     timeSpentSeconds: 420,
     remediationCompleted: true,
@@ -416,7 +416,7 @@ export const SEED_LEARNERS: PilotLearner[] = [
         timestamp: '2026-10-10T09:10:00Z',
       },
     ],
-    gurujiReadiness: 'ready_for_supervised_practice',
+    athenaReadiness: 'ready_for_supervised_practice',
     workplaceReadiness: 'workplace_demonstration_passed',
     timeSpentSeconds: 180,
     remediationCompleted: false,
@@ -479,7 +479,7 @@ export function assignSopToLearner(
     assignedAt: new Date().toISOString(),
     progress: { learnCompleted: false, seeCompleted: false, guideCompleted: false, proveCompleted: false },
     attempts: [],
-    gurujiReadiness: 'targeted_remediation_required',
+    athenaReadiness: 'targeted_remediation_required',
     workplaceReadiness: 'pending_supervisor_observation',
     timeSpentSeconds: 0,
     remediationCompleted: false,
@@ -565,15 +565,15 @@ export function calculatePilotScorecard(domain: string = 'All'): PilotScorecard 
 
   const totalAssigned = learners.length;
   const startedCount = learners.filter((l) => l.attempts.length > 0 || l.progress.learnCompleted).length;
-  const completedCount = learners.filter((l) => l.progress.proveCompleted && l.gurujiReadiness === 'ready_for_supervised_practice').length;
-  const awaitingSupervisorCount = learners.filter((l) => l.gurujiReadiness === 'ready_for_supervised_practice' && l.workplaceReadiness === 'pending_supervisor_observation').length;
+  const completedCount = learners.filter((l) => l.progress.proveCompleted && l.athenaReadiness === 'ready_for_supervised_practice').length;
+  const awaitingSupervisorCount = learners.filter((l) => l.athenaReadiness === 'ready_for_supervised_practice' && l.workplaceReadiness === 'pending_supervisor_observation').length;
   const workplaceCertifiedCount = learners.filter((l) => l.workplaceReadiness === 'workplace_demonstration_passed').length;
-  const remediationOutstandingCount = learners.filter((l) => l.gurujiReadiness === 'targeted_remediation_required').length;
+  const remediationOutstandingCount = learners.filter((l) => l.athenaReadiness === 'targeted_remediation_required').length;
 
   // Real Learner Cohort Filter
   const realLearners = learners.filter((l) => !l.cohortType || l.cohortType === 'real_frontline_learner');
   const totalRealLearners = realLearners.length;
-  const realLearnersCompleted = realLearners.filter((l) => l.progress.proveCompleted && l.gurujiReadiness === 'ready_for_supervised_practice').length;
+  const realLearnersCompleted = realLearners.filter((l) => l.progress.proveCompleted && l.athenaReadiness === 'ready_for_supervised_practice').length;
 
   const realFirstAttempts = realLearners.map((l) => ({ learner: l, attempt: l.attempts[0] })).filter((x) => Boolean(x.attempt));
   const realFirstAttemptPassCount = realFirstAttempts.filter((x) => x.attempt.passed && x.attempt.criticalControlPassed).length;
@@ -582,7 +582,7 @@ export function calculatePilotScorecard(domain: string = 'All'): PilotScorecard 
   const realCriticalControlFailures = realFirstAttempts.filter((x) => !x.attempt.criticalControlPassed).length;
 
   const realRemediationLearners = realLearners.filter((l) => l.attempts.length > 1 || l.remediationCompleted);
-  const realRemediationRecovered = realRemediationLearners.filter((l) => l.gurujiReadiness === 'ready_for_supervised_practice').length;
+  const realRemediationRecovered = realRemediationLearners.filter((l) => l.athenaReadiness === 'ready_for_supervised_practice').length;
   const realRemediationDenominator = realRemediationLearners.length;
 
   const realSupervisorEvaluated = realLearners.filter((l) => Boolean(l.supervisorObservation));
@@ -627,7 +627,7 @@ export function calculatePilotScorecard(domain: string = 'All'): PilotScorecard 
 
   // Remediation Recovery Success
   const learnersWhoNeededRemediation = learners.filter((l) => l.attempts.length > 1 || l.remediationCompleted);
-  const remediationRecoveredCount = learnersWhoNeededRemediation.filter((l) => l.gurujiReadiness === 'ready_for_supervised_practice').length;
+  const remediationRecoveredCount = learnersWhoNeededRemediation.filter((l) => l.athenaReadiness === 'ready_for_supervised_practice').length;
   const remediationSuccessRate = learnersWhoNeededRemediation.length > 0 ? Math.round((remediationRecoveredCount / learnersWhoNeededRemediation.length) * 100) : 100;
 
   // Supervisor Pass Rate
@@ -695,7 +695,7 @@ export function calculatePilotScorecard(domain: string = 'All'): PilotScorecard 
     status: 'GO_FOR_BROADER_PILOT',
     title: 'APPROVED FOR BROADER PILOT (PASSED WITH SOP AMBIGUITY CONDITION)',
     decisionDate: new Date().toISOString().split('T')[0],
-    approvedBy: 'Operations Steering Committee & Guruji Pilot Owner',
+    approvedBy: 'Operations Steering Committee & Athena Pilot Owner',
     summary: `Real frontline learner cohort (${realLearnersCompleted}/${totalRealLearners} completed) demonstrated measurable capability improvement: average assessment score improved from ${avgPreRemediationScore}% (1st attempt) to ${avgPostRemediationScore}% (post-remediation), with ${realRemediationRecovered}/${realRemediationDenominator} remediation recovery and ${realSupervisorCertified}/${realSupervisorDenominator} supervisor floor certification.`,
     conditions: [
       '1. Clarify Section 2.1 photo upload app naming in Housekeeping SOP Urban-501 prior to multi-site shift rollout.',

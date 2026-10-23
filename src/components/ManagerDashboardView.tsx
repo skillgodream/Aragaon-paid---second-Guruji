@@ -106,7 +106,7 @@ export default function ManagerDashboardView({
   // Per-learner module completion overrides (keyed by `${learnerId}__${moduleId}`)
   const [moduleCompletionMap, setModuleCompletionMap] = useState<Record<string, boolean>>(() => {
     try {
-      const saved = JSON.parse(localStorage.getItem('guruji_manager_module_completion') || 'null');
+      const saved = JSON.parse(localStorage.getItem('athena_manager_module_completion') || 'null');
       return saved && typeof saved === 'object' ? saved : {};
     } catch {
       return {};
@@ -116,7 +116,7 @@ export default function ManagerDashboardView({
   // Read Admin role modules map from localStorage so Admin & Manager stay in sync
   const roleModulesMap = useMemo<Record<string, RoleModuleItem[]>>(() => {
     try {
-      const saved = JSON.parse(localStorage.getItem('guruji_role_phase_modules') || 'null');
+      const saved = JSON.parse(localStorage.getItem('athena_role_phase_modules') || 'null');
       return saved && typeof saved === 'object'
         ? { ...INITIAL_ROLE_MODULES, ...saved }
         : INITIAL_ROLE_MODULES;
@@ -185,7 +185,7 @@ export default function ManagerDashboardView({
     const key = `${learner.id}__${mod.id}`;
     const updated = { ...moduleCompletionMap, [key]: !currentStatus };
     setModuleCompletionMap(updated);
-    localStorage.setItem('guruji_manager_module_completion', JSON.stringify(updated));
+    localStorage.setItem('athena_manager_module_completion', JSON.stringify(updated));
   };
 
   // Ensure scroll is at the top when entering Manager or switching learner progress
@@ -721,7 +721,7 @@ export default function ManagerDashboardView({
                 ) : (
                   filteredLearners.map((learner) => {
                     const isWorkplaceCertified = learner.workplaceReadiness === 'workplace_demonstration_passed';
-                    const isGurujiReady = learner.gurujiReadiness === 'ready_for_supervised_practice';
+                    const isAthenaReady = learner.athenaReadiness === 'ready_for_supervised_practice';
 
                     return (
                       <div
@@ -732,7 +732,7 @@ export default function ManagerDashboardView({
                           <div className="flex items-center gap-2">
                             <span className="text-sm font-bold text-white">{learner.name}</span>
                             <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white/10 text-white/70">
-                              {isWorkplaceCertified ? 'Certified' : isGurujiReady ? 'Ready for Observation' : 'In Training'}
+                              {isWorkplaceCertified ? 'Certified' : isAthenaReady ? 'Ready for Observation' : 'In Training'}
                             </span>
                           </div>
                           <span className="text-xs text-[#8E8E93] block mt-0.5">

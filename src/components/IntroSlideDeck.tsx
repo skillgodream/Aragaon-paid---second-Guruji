@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, Volume2, ArrowRight, ArrowLeft, Check, AlertCircle, HelpCircle, UserCheck, ShieldCheck, FileText, Lightbulb, Shield } from 'lucide-react';
 import ClayArt from './ClayArt';
 import ToolDetailModal from './ToolDetailModal';
+import { FeynmanCard } from './FeynmanCard';
 import { WAREHOUSE_TOOLS, STEP_JOURNEY } from '../data/lessonsData';
 import { ToolItem, Lesson } from '../types';
 import { sounds } from '../utils/audio';
@@ -19,7 +20,7 @@ export default function IntroSlideDeck({ lesson, onClose, onStartSimulation, onA
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [activeDecisionGate, setActiveDecisionGate] = useState<'all' | 'accept' | 'reject' | 'pause'>('all');
 
-  const totalSlides = 8;
+  const totalSlides = 9;
 
   // Extract dynamic items if lesson is present
   const dynamicSteps = lesson?.blueprint?.scenarios.watch || [];
@@ -762,8 +763,21 @@ export default function IntroSlideDeck({ lesson, onClose, onStartSimulation, onA
           </div>
         )}
 
-        {/* SLIDE 8: Now You Do It */}
         {currentSlide === 7 && (
+          <div className="flex-1 flex flex-col h-full animate-in fade-in duration-300">
+            <div className="h-[40%] bg-[#FFF2C9] relative flex items-center justify-center p-6">
+              <ClayArt type="guru" size={135} />
+            </div>
+            <div className="flex-1 bg-white rounded-t-[32px] -mt-6 p-6 shadow-sm flex flex-col justify-between overflow-y-auto z-10">
+              <h1 className="text-2xl font-bold text-[#0E1116] mb-2">Feynman Technique</h1>
+              {/* @ts-ignore */}
+              <FeynmanCard metadata={lesson?.blueprint?.units[0]?.feynmanMetadata} />
+            </div>
+          </div>
+        )}
+
+        {/* SLIDE 8: Now You Do It */}
+        {currentSlide === 8 && (
           <div className="flex-1 flex flex-col h-full animate-in fade-in duration-300">
             <div className="h-[44%] bg-[#DCEBFF] relative flex items-center justify-center p-6">
               <button
@@ -774,7 +788,6 @@ export default function IntroSlideDeck({ lesson, onClose, onStartSimulation, onA
               </button>
               <ClayArt type="clipboard" size={135} />
             </div>
-
             <div className="flex-1 bg-white rounded-t-[32px] -mt-6 p-6 shadow-sm flex flex-col justify-between overflow-y-auto z-10">
               <div>
                 <span className="inline-block text-xs font-bold uppercase tracking-wider text-[#F27A1A] bg-[#FFE6D2] px-3 py-1 rounded-full mb-2">
@@ -786,7 +799,6 @@ export default function IntroSlideDeck({ lesson, onClose, onStartSimulation, onA
                 <p className="text-base font-semibold text-[#3D4652] leading-relaxed mb-4">
                   Practice the operational steps for {lesson?.title || 'this SOP'} with live feedback from Guruji.
                 </p>
-
                 <div className="p-3 bg-[#F7F7F5] rounded-2xl border border-[#E6E8EC] flex justify-around text-center">
                   <div>
                     <span className="text-[10px] uppercase font-bold text-[#66726B] block">Steps</span>
@@ -804,7 +816,6 @@ export default function IntroSlideDeck({ lesson, onClose, onStartSimulation, onA
                   </div>
                 </div>
               </div>
-
               <div className="pt-4 flex gap-3">
                 <button
                   onClick={handlePrev}

@@ -859,6 +859,38 @@ app.post('/api/coach', async (req, res) => {
   }
 });
 
+
+app.post('/api/gemini/author-card', async (req, res) => {
+  try {
+    const { draft } = req.body;
+    const aiClient = getGeminiClient(req);
+    if (!aiClient) return res.status(401).json({ status: 'FAILURE' });
+
+    const prompt = `You are a strict technical author for operational SOPs. Write the slide card copy based on the provided source text.
+Strict constraints:
+- Title: Max 40 characters.
+- Body: Max 120 characters.
+- Cue: Max 60 characters.
+- Do not invent information. If the source text is insufficient, return title: 'UNRESOLVED', body: 'UNRESOLVED', cue: 'UNRESOLVED'.
+- Output strictly in JSON format: { "title": string, "body": string, "cue": string }
+
+Source Text: ${draft.label} - ${draft.value} - ${draft.subtext}
+Source Ref: ${draft.sourceRef}`;
+
+    const response = await generateContentWithFallback(aiClient, {
+      contents: prompt,
+      config: {
+        responseMimeType: 'application/json',
+      },
+    });
+
+    const parsed = JSON.parse(response.text || '{}');
+    return res.json({ ...parsed, status: 'SUCCESS' });
+  } catch (error) {
+    return res.json({ title: 'UNRESOLVED', body: 'UNRESOLVED', cue: 'UNRESOLVED', status: 'FAILURE' });
+  }
+});
+
 // API Route: Generate or Match Realistic Workplace Image using Art Director + Gemini Image Generator
 app.post('/api/gemini/generate-image', async (req, res) => {
   try {

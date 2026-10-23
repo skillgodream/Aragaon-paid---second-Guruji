@@ -1,4 +1,4 @@
-/* WORLD-CLASS GURUJI WORK COACH VISUAL SYSTEM — Premium Monochrome / Sleek Dark Theme */
+/* WORLD-CLASS ATHENA WORK COACH VISUAL SYSTEM — Premium Monochrome / Sleek Dark Theme */
 :root {
   --lux-bg: #0B0C0E;
   --lux-surface: #121620;
@@ -12,7 +12,7 @@
   --lux-purple: #8B5CF6;
 }
 
-.guruji-coach-wrapper {
+.athena-coach-wrapper {
   position: fixed;
   inset: 0;
   z-index: 50;
@@ -29,11 +29,11 @@
   box-sizing: border-box;
 }
 
-.guruji-coach-wrapper * {
+.athena-coach-wrapper * {
   box-sizing: border-box;
 }
 
-.guruji-coach-app {
+.athena-coach-app {
   width: min(100vw, 440px);
   min-height: 100vh;
   background: linear-gradient(180deg, #0D111A 0%, #07090E 100%);
@@ -46,10 +46,10 @@
 }
 
 @media (min-width: 500px) {
-  .guruji-coach-wrapper {
+  .athena-coach-wrapper {
     padding: 16px;
   }
-  .guruji-coach-app {
+  .athena-coach-app {
     min-height: 780px;
     height: 100dvh;
     max-height: 880px;
@@ -68,7 +68,7 @@
 }
 
 /* Header */
-.guruji-coach-app .header {
+.athena-coach-app .header {
   height: 64px;
   padding: 14px 18px !important;
   display: flex;
@@ -82,7 +82,7 @@
   z-index: 20;
 }
 
-.guruji-coach-app .brand {
+.athena-coach-app .brand {
   font-size: 11px !important;
   font-weight: 800 !important;
   letter-spacing: 0.12em !important;
@@ -92,7 +92,7 @@
   gap: 8px;
 }
 
-.guruji-coach-app .back-btn {
+.athena-coach-app .back-btn {
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 999px;
@@ -112,7 +112,7 @@
   color: #FFFFFF;
 }
 
-.guruji-coach-app .cancel-btn {
+.athena-coach-app .cancel-btn {
   background: rgba(239, 68, 68, 0.12);
   border: 1px solid rgba(239, 68, 68, 0.25);
   border-radius: 999px;
@@ -132,7 +132,7 @@
   color: #FCA5A5;
 }
 
-.guruji-coach-app .live {
+.athena-coach-app .live {
   font-size: 9px !important;
   font-weight: 800;
   background: rgba(255, 255, 255, 0.08) !important;
@@ -146,7 +146,7 @@
   letter-spacing: 0.08em;
 }
 
-.guruji-coach-app .live i {
+.athena-coach-app .live i {
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -155,13 +155,13 @@
 }
 
 /* Progress Bar & Nodes */
-.guruji-coach-app .progress {
+.athena-coach-app .progress {
   padding: 8px 18px 12px !important;
   background: transparent;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.guruji-coach-app .progressLine {
+.athena-coach-app .progressLine {
   height: 6px !important;
   background: rgba(255, 255, 255, 0.1) !important;
   border-radius: 99px !important;
@@ -169,7 +169,7 @@
   overflow: hidden;
 }
 
-.guruji-coach-app .progressFill {
+.athena-coach-app .progressFill {
   height: 100%;
   background: linear-gradient(90deg, #3B82F6, #10B981) !important;
   box-shadow: 0 0 12px rgba(16, 185, 129, 0.4);
@@ -177,13 +177,13 @@
   transition: width 0.35s ease-out;
 }
 
-.guruji-coach-app .nodes {
+.athena-coach-app .nodes {
   display: flex;
   justify-content: space-between;
   margin-top: -11px;
 }
 
-.guruji-coach-app .node {
+.athena-coach-app .node {
   width: 16px;
   height: 16px;
   border-radius: 50%;
@@ -192,13 +192,13 @@
   transition: all 0.25s ease;
 }
 
-.guruji-coach-app .node.done {
+.athena-coach-app .node.done {
   background: #10B981 !important;
   border-color: #10B981 !important;
   box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
 }
 
-.guruji-coach-app .node.active {
+.athena-coach-app .node.active {
   background: #3B82F6 !important;
   border-color: #60A5FA !important;
   box-shadow: 0 0 10px rgba(59, 130, 246, 0.6) !important;
@@ -206,18 +206,18 @@
 }
 
 /* Task Meta & Phase */
-.guruji-coach-app .task {
+.athena-coach-app .task {
   padding: 14px 16px 0 !important;
 }
 
-.guruji-coach-app .taskMeta {
+.athena-coach-app .taskMeta {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 10px !important;
 }
 
-.guruji-coach-app .phase {
+.athena-coach-app .phase {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -232,14 +232,14 @@
   text-transform: uppercase;
 }
 
-.guruji-coach-app .phase .dot {
+.athena-coach-app .phase .dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: #3B82F6 !important;
 }
 
-.guruji-coach-app .counter {
+.athena-coach-app .counter {
   font-size: 11px;
   color: #9CA3AF !important;
   font-weight: 700;
@@ -247,7 +247,7 @@
 }
 
 /* Radiant Hero Task Card */
-.guruji-coach-app .taskCard.heroTask {
+.athena-coach-app .taskCard.heroTask {
   position: relative;
   overflow: hidden;
   padding: 0;
@@ -259,13 +259,13 @@
   transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.guruji-coach-app .heroTask .heroInner {
+.athena-coach-app .heroTask .heroInner {
   position: relative;
   padding: 18px 20px !important;
   z-index: 1;
 }
 
-.guruji-coach-app .heroTask .taskTitle {
+.athena-coach-app .heroTask .taskTitle {
   font-size: 22px !important;
   line-height: 1.15 !important;
   letter-spacing: -0.03em !important;
@@ -274,14 +274,14 @@
   color: #FFFFFF;
 }
 
-.guruji-coach-app .heroTask .taskSub {
+.athena-coach-app .heroTask .taskSub {
   font-size: 11px;
   color: #9CA3AF !important;
   margin-top: 3px;
   font-weight: 500;
 }
 
-.guruji-coach-app .heroTask .priority {
+.athena-coach-app .heroTask .priority {
   font-size: 9px !important;
   font-weight: 800 !important;
   background: rgba(59, 130, 246, 0.2) !important;
@@ -293,7 +293,7 @@
   letter-spacing: 0.08em;
 }
 
-.guruji-coach-app .heroTask .item {
+.athena-coach-app .heroTask .item {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -302,7 +302,7 @@
   border-top: 1px solid rgba(255, 255, 255, 0.08) !important;
 }
 
-.guruji-coach-app .heroTask .itemIcon {
+.athena-coach-app .heroTask .itemIcon {
   width: 40px;
   height: 40px;
   border-radius: 12px;
@@ -315,34 +315,34 @@
   color: #FFF;
 }
 
-.guruji-coach-app .heroTask .item b {
+.athena-coach-app .heroTask .item b {
   font-size: 13px;
   color: #F3F4F6;
   font-weight: 700;
 }
 
-.guruji-coach-app .heroTask .item span {
+.athena-coach-app .heroTask .item span {
   display: block;
   font-size: 11px;
   color: #9CA3AF !important;
   margin-top: 2px;
 }
 
-.guruji-coach-app .heroTask .target {
+.athena-coach-app .heroTask .target {
   margin-top: 12px;
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 8px;
 }
 
-.guruji-coach-app .heroTask .targetBox {
+.athena-coach-app .heroTask .targetBox {
   background: rgba(255, 255, 255, 0.05) !important;
   border: 1px solid rgba(255, 255, 255, 0.08) !important;
   border-radius: 12px;
   padding: 8px 12px;
 }
 
-.guruji-coach-app .heroTask .targetBox label {
+.athena-coach-app .heroTask .targetBox label {
   display: block;
   font-size: 8px;
   font-weight: 800;
@@ -351,7 +351,7 @@
   text-transform: uppercase;
 }
 
-.guruji-coach-app .heroTask .targetBox strong {
+.athena-coach-app .heroTask .targetBox strong {
   display: block;
   font-size: 15px;
   margin-top: 2px;
@@ -359,43 +359,43 @@
   font-weight: 700;
 }
 
-.guruji-coach-app .heroTask .qty {
+.athena-coach-app .heroTask .qty {
   background: rgba(16, 185, 129, 0.15) !important;
   border-color: rgba(16, 185, 129, 0.3) !important;
 }
 
-.guruji-coach-app .heroTask .qty strong {
+.athena-coach-app .heroTask .qty strong {
   color: #34D399 !important;
 }
 
 /* Card States: Correct, Wrong, Coach */
-.guruji-coach-app .taskCard.heroTask.state-correct {
+.athena-coach-app .taskCard.heroTask.state-correct {
   background: linear-gradient(145deg, #064E3B 0%, #047857 100%) !important;
   border-color: rgba(52, 211, 153, 0.4) !important;
   box-shadow: 0 20px 40px rgba(4, 120, 87, 0.3) !important;
 }
 
-.guruji-coach-app .taskCard.heroTask.state-wrong {
+.athena-coach-app .taskCard.heroTask.state-wrong {
   background: linear-gradient(145deg, #7F1D1D 0%, #991B1B 100%) !important;
   border-color: rgba(248, 113, 113, 0.4) !important;
   box-shadow: 0 20px 40px rgba(153, 27, 27, 0.3) !important;
 }
 
-.guruji-coach-app .taskCard.heroTask.state-coach {
+.athena-coach-app .taskCard.heroTask.state-coach {
   background: linear-gradient(145deg, #312E81 0%, #4338CA 100%) !important;
   border-color: rgba(165, 180, 252, 0.4) !important;
   box-shadow: 0 20px 40px rgba(67, 56, 202, 0.3) !important;
 }
 
 /* Action Area */
-.guruji-coach-app .action {
+.athena-coach-app .action {
   padding: 16px 16px 20px !important;
   flex: 1;
   display: flex;
   flex-direction: column;
 }
 
-.guruji-coach-app .question {
+.athena-coach-app .question {
   font-size: 18px !important;
   line-height: 1.3 !important;
   letter-spacing: -0.02em !important;
@@ -405,12 +405,12 @@
 }
 
 /* Choices list */
-.guruji-coach-app .choices {
+.athena-coach-app .choices {
   display: grid;
   gap: 10px !important;
 }
 
-.guruji-coach-app .choice {
+.athena-coach-app .choice {
   position: relative;
   text-align: left;
   width: 100%;
@@ -428,17 +428,17 @@
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.guruji-coach-app .choice:hover:not(:disabled) {
+.athena-coach-app .choice:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.08) !important;
   border-color: rgba(255, 255, 255, 0.2) !important;
   transform: translateY(-1px);
 }
 
-.guruji-coach-app .choice:active {
+.athena-coach-app .choice:active {
   transform: scale(0.985);
 }
 
-.guruji-coach-app .choice strong {
+.athena-coach-app .choice strong {
   font-size: 14px !important;
   line-height: 1.3 !important;
   font-weight: 700;
@@ -449,7 +449,7 @@
   color: #F9FAFB;
 }
 
-.guruji-coach-app .choice small {
+.athena-coach-app .choice small {
   display: block;
   font-size: 11px;
   color: #9CA3AF;
@@ -460,50 +460,50 @@
   overflow-wrap: break-word !important;
 }
 
-.guruji-coach-app .choice.correct {
+.athena-coach-app .choice.correct {
   background: linear-gradient(135deg, #059669 0%, #047857 100%) !important;
   border-color: #10B981 !important;
   color: #FFFFFF !important;
   box-shadow: 0 10px 25px rgba(16, 185, 129, 0.3) !important;
 }
 
-.guruji-coach-app .choice.correct strong,
-.guruji-coach-app .choice.correct small {
+.athena-coach-app .choice.correct strong,
+.athena-coach-app .choice.correct small {
   color: #FFFFFF !important;
 }
 
-.guruji-coach-app .choice.wrong {
+.athena-coach-app .choice.wrong {
   background: linear-gradient(135deg, #DC2626 0%, #B91C1C 100%) !important;
   border-color: #EF4444 !important;
   color: #FFFFFF !important;
   box-shadow: 0 10px 25px rgba(239, 68, 68, 0.3) !important;
 }
 
-.guruji-coach-app .choice.wrong strong,
-.guruji-coach-app .choice.wrong small {
+.athena-coach-app .choice.wrong strong,
+.athena-coach-app .choice.wrong small {
   color: #FFFFFF !important;
 }
 
-.guruji-coach-app .choice.disabled {
+.athena-coach-app .choice.disabled {
   opacity: 0.35 !important;
   pointer-events: none;
 }
 
-.guruji-coach-app .choice .mark {
+.athena-coach-app .choice .mark {
   font-size: 18px;
   font-weight: 900;
   margin-left: 12px;
 }
 
-/* Guruji Speech Bubble */
-.guruji-coach-app .guru {
+/* Athena Speech Bubble */
+.athena-coach-app .guru {
   margin-top: 16px !important;
   display: flex;
   gap: 10px;
   align-items: flex-start !important;
 }
 
-.guruji-coach-app .gMark {
+.athena-coach-app .gMark {
   width: 36px !important;
   height: 36px !important;
   border-radius: 12px !important;
@@ -517,7 +517,7 @@
   flex: none;
 }
 
-.guruji-coach-app .gBubble {
+.athena-coach-app .gBubble {
   flex: 1;
   background: rgba(255, 255, 255, 0.05) !important;
   border: 1px solid rgba(255, 255, 255, 0.1) !important;
@@ -530,7 +530,7 @@
   transition: all 0.25s ease;
 }
 
-.guruji-coach-app .gBubble b {
+.athena-coach-app .gBubble b {
   display: inline-block;
   color: #818CF8;
   font-size: 9px;
@@ -540,20 +540,20 @@
   text-transform: uppercase;
 }
 
-.guruji-coach-app .gBubble.bad {
+.athena-coach-app .gBubble.bad {
   background: rgba(239, 68, 68, 0.1) !important;
   border-color: rgba(239, 68, 68, 0.3) !important;
   color: #FCA5A5;
 }
 
 /* Bottom Actions */
-.guruji-coach-app .bottom {
+.athena-coach-app .bottom {
   padding: 8px 16px 20px !important;
   background: transparent !important;
   margin-top: auto;
 }
 
-.guruji-coach-app .showMe {
+.athena-coach-app .showMe {
   width: 100%;
   margin-bottom: 8px;
   min-height: 46px !important;
@@ -567,18 +567,18 @@
   transition: all 0.2s;
 }
 
-.guruji-coach-app .showMe:hover {
+.athena-coach-app .showMe:hover {
   background: rgba(255, 255, 255, 0.14) !important;
 }
 
-.guruji-coach-app .bottom-controls {
+.athena-coach-app .bottom-controls {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
 }
 
-.guruji-coach-app .btn-back-action {
+.athena-coach-app .btn-back-action {
   flex: 1;
   min-height: 50px !important;
   border-radius: 16px !important;
@@ -594,12 +594,12 @@
   justify-content: center;
 }
 
-.guruji-coach-app .btn-back-action:hover {
+.athena-coach-app .btn-back-action:hover {
   background: rgba(255, 255, 255, 0.15) !important;
   color: #FFFFFF !important;
 }
 
-.guruji-coach-app .btn-cancel-action {
+.athena-coach-app .btn-cancel-action {
   flex: 1;
   min-height: 50px !important;
   border-radius: 16px !important;
@@ -615,13 +615,13 @@
   justify-content: center;
 }
 
-.guruji-coach-app .btn-cancel-action:hover {
+.athena-coach-app .btn-cancel-action:hover {
   background: rgba(239, 68, 68, 0.2) !important;
   color: #FCA5A5 !important;
 }
 
-.guruji-coach-app .bottom-controls .next,
-.guruji-coach-app .next {
+.athena-coach-app .bottom-controls .next,
+.athena-coach-app .next {
   flex: 2;
   width: auto;
   min-height: 52px !important;
@@ -636,26 +636,26 @@
   transition: all 0.2s;
 }
 
-.guruji-coach-app .next:hover:not(:disabled) {
+.athena-coach-app .next:hover:not(:disabled) {
   background: #F3F4F6 !important;
   transform: translateY(-1px);
 }
 
-.guruji-coach-app .next:disabled {
+.athena-coach-app .next:disabled {
   opacity: 0.35;
   box-shadow: none;
   cursor: not-allowed;
 }
 
 /* Readiness Report */
-.guruji-coach-app .report {
+.athena-coach-app .report {
   padding: 20px 18px;
   flex: 1;
   display: flex;
   flex-direction: column;
 }
 
-.guruji-coach-app .readiness {
+.athena-coach-app .readiness {
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.1);
   color: #fff;
@@ -664,7 +664,7 @@
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
 }
 
-.guruji-coach-app .readyPill {
+.athena-coach-app .readyPill {
   display: inline-block;
   background: rgba(16, 185, 129, 0.15);
   color: #34D399;
@@ -677,13 +677,13 @@
   letter-spacing: 0.08em;
 }
 
-.guruji-coach-app .readyPill.coaching {
+.athena-coach-app .readyPill.coaching {
   background: rgba(245, 158, 11, 0.15);
   color: #FBBF24;
   border-color: rgba(245, 158, 11, 0.3);
 }
 
-.guruji-coach-app .score {
+.athena-coach-app .score {
   font-size: 46px;
   font-weight: 900;
   letter-spacing: -0.05em;
@@ -691,28 +691,28 @@
   color: #FFFFFF;
 }
 
-.guruji-coach-app .score span {
+.athena-coach-app .score span {
   font-size: 13px;
   color: #9CA3AF;
   letter-spacing: 0;
   font-weight: 600;
 }
 
-.guruji-coach-app .metrics {
+.athena-coach-app .metrics {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
   margin-top: 14px;
 }
 
-.guruji-coach-app .metric {
+.athena-coach-app .metric {
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 14px;
   padding: 10px 12px;
 }
 
-.guruji-coach-app .metric small {
+.athena-coach-app .metric small {
   display: block;
   color: #9CA3AF;
   font-size: 9px;
@@ -721,14 +721,14 @@
   letter-spacing: 0.08em;
 }
 
-.guruji-coach-app .metric b {
+.athena-coach-app .metric b {
   display: block;
   font-size: 16px;
   margin-top: 2px;
   color: #FFFFFF;
 }
 
-.guruji-coach-app .fix {
+.athena-coach-app .fix {
   margin-top: 14px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -736,39 +736,39 @@
   padding: 16px;
 }
 
-.guruji-coach-app .fix h3 {
+.athena-coach-app .fix h3 {
   margin: 0 0 10px;
   font-size: 14px;
   font-weight: 800;
   color: #FFFFFF;
 }
 
-.guruji-coach-app .fixRow {
+.athena-coach-app .fixRow {
   padding: 10px 0;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   font-size: 12px;
 }
 
-.guruji-coach-app .fixRow b {
+.athena-coach-app .fixRow b {
   display: block;
   font-size: 13px;
   color: #F3F4F6;
   margin-bottom: 2px;
 }
 
-.guruji-coach-app .fixRow span {
+.athena-coach-app .fixRow span {
   color: #9CA3AF;
   line-height: 1.4;
 }
 
-.guruji-coach-app .introActions {
+.athena-coach-app .introActions {
   display: flex;
   gap: 10px;
   margin-top: 18px;
 }
 
-.guruji-coach-app .primary,
-.guruji-coach-app .secondary {
+.athena-coach-app .primary,
+.athena-coach-app .secondary {
   border: 0;
   border-radius: 16px;
   min-height: 50px;
@@ -781,7 +781,7 @@
   transition: all 0.2s ease;
 }
 
-.guruji-coach-app .primary {
+.athena-coach-app .primary {
   flex: 1;
   background: #FFFFFF;
   color: #090D16;
@@ -804,10 +804,10 @@
 }
 
 @media (max-width: 430px) {
-  .guruji-coach-app .heroTask .taskTitle {
+  .athena-coach-app .heroTask .taskTitle {
     font-size: 20px !important;
   }
-  .guruji-coach-app .question {
+  .athena-coach-app .question {
     font-size: 17px !important;
   }
 }
